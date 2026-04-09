@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       ? { title: text.length > 60 ? `${text.slice(0, 57)}…` : text }
       : {};
 
-  const acquired = await db
+  await db
     .update(managedAgentSession)
     .set({
       tailing: true,
@@ -69,29 +69,15 @@ export async function POST(request: Request) {
       and(
         eq(managedAgentSession.id, sessionId),
         eq(managedAgentSession.userId, authz.userId),
-        eq(managedAgentSession.tailing, false),
       ),
-    )
-    .returning({ id: managedAgentSession.id });
+    );
 
-  if (acquired.length > 0) {
-    await start(tailSessionWorkflow, [
-      {
-        internalSessionId: sessionId,
-        anthropicSessionId: row.anthropicSessionId,
-      },
-    ]);
-  } else {
-    await db
-      .update(managedAgentSession)
-      .set({ updatedAt: new Date(), ...titleUpdate })
-      .where(
-        and(
-          eq(managedAgentSession.id, sessionId),
-          eq(managedAgentSession.userId, authz.userId),
-        ),
-      );
-  }
+  await start(tailSessionWorkflow, [
+    {
+      internalSessionId: sessionId,
+      anthropicSessionId: row.anthropicSessionId,
+    },
+  ]);
 
   return NextResponse.json({ ok: true });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronDown, Loader2 } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type TranscriptEvent = {
@@ -27,6 +27,8 @@ function textFromContent(content: unknown): string {
   return parts.join("\n");
 }
 
+/* ---------- Markdown ---------- */
+
 function SimpleMarkdown({ text }: { text: string }) {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
@@ -45,7 +47,7 @@ function SimpleMarkdown({ text }: { text: string }) {
       }
       i++;
       elements.push(
-        <div key={elements.length} className="my-3 rounded-lg border border-border bg-muted/50 overflow-hidden">
+        <div key={elements.length} className="my-3 overflow-hidden rounded-lg border border-border bg-muted/50">
           {lang && (
             <div className="border-b border-border px-4 py-1.5 text-[11px] text-muted-foreground">
               {lang}
@@ -78,7 +80,7 @@ function SimpleMarkdown({ text }: { text: string }) {
 
 function renderInline(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  const regex = /(\*\*(.+?)\*\*)|(`([^`]+?)`)/g;
+  const regex = /(\*\*(.+?)\*\*)|(`([^`]+?)`)|(\[([^\]]+)\]\(([^)]+)\))/g;
   let lastIndex = 0;
   let match;
 
@@ -94,6 +96,12 @@ function renderInline(text: string): React.ReactNode[] {
           {match[4]}
         </code>,
       );
+    } else if (match[6] && match[7]) {
+      nodes.push(
+        <a key={match.index} href={match[7]} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline underline-offset-2 hover:text-blue-300">
+          {match[6]}
+        </a>,
+      );
     }
     lastIndex = match.index + match[0].length;
   }
@@ -105,43 +113,167 @@ function renderInline(text: string): React.ReactNode[] {
   return nodes;
 }
 
-function ToolGroup({ tools }: { tools: TranscriptEvent[] }) {
+/* ---------- Tool categorization ---------- */
+
+function toolCategory(name: string): string {
+  switch (name) {
+    case "bash":
+    case "shell":
+      return "ran";
+    case "edit":
+      return "edited";
+    case "write":
+      return "wrote";
+    case "read":
+      return "read";
+    case "grep":
+    case "rg":
+    case "glob":
+    case "list":
+    case "web_search":
+      return "searched";
+    case "webfetch":
+    case "web_fetch":
+      return "fetched";
+    case "task":
+      return "other";
+    default:
+      return "other";
+  }
+}
+
+function summarizeToolGroup(tools: TranscriptEvent[]): string {
+  const counts = new Map<string, number>();
+  for (const tool of tools) {
+    const name = typeof tool.payload.name === "string" ? tool.payload.name : "unknown";
+    const cat = toolCategory(name);
+    counts.set(cat, (counts.get(cat) ?? 0) + 1);
+  }
+
+  const order: [string, string, string, string][] = [
+    ["ran", "Ran", "command", "commands"],
+    ["edited", "Edited", "file", "files"],
+    ["wrote", "Wrote", "file", "files"],
+    ["read", "Read", "file", "files"],
+    ["searched", "Searched", "pattern", "patterns"],
+    ["fetched", "Fetched", "URL", "URLs"],
+    ["other", "Ran", "action", "actions"],
+  ];
+
+  const parts: string[] = [];
+  for (const [key, verb, singular, plural] of order) {
+    const n = counts.get(key);
+    if (!n) continue;
+    parts.push(`${verb} ${n} ${n === 1 ? singular : plural}`);
+  }
+
+  return parts.join(", ") || `${tools.length} tool calls`;
+}
+
+function describeToolAction(name: string, input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const obj = input as Record<string, unknown>;
+  if (name === "bash" || name === "shell") {
+    const cmd = typeof obj.command === "string" ? obj.command : "";
+    return cmd.length > 60 ? cmd.slice(0, 60) + "..." : cmd;
+  }
+  if (name === "read" || name === "write" || name === "edit") {
+    return typeof obj.path === "string" ? obj.path : typeof obj.file_path === "string" ? obj.file_path : "";
+  }
+  if (name === "grep" || name === "rg") {
+    return typeof obj.pattern === "string" ? obj.pattern : "";
+  }
+  return "";
+}
+
+function ToolCallItem({ ev }: { ev: TranscriptEvent }) {
   const [expanded, setExpanded] = useState(false);
-  const count = tools.length;
+  const rawName = typeof ev.payload.name === "string" ? ev.payload.name : ev.type.replace("agent.", "");
+  const input = ev.payload.input;
+  const label = describeToolAction(rawName, input);
+  const hasDetail = input && typeof input === "object" && Object.keys(input as object).length > 0;
 
   return (
-    <div className="my-1">
+    <div className="py-0.5">
       <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        type="button"
+        className={cn(
+          "flex w-full items-center gap-2 py-0.5 text-left text-xs text-muted-foreground transition-colors",
+          hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
+        )}
+        onClick={() => hasDetail && setExpanded((v) => !v)}
       >
-        <span>Ran {count} action{count !== 1 ? "s" : ""}</span>
-        <ChevronDown
-          className={cn("size-3.5 transition-transform", expanded && "rotate-180")}
+        <Check className="size-3 shrink-0 text-emerald-500" />
+        <span className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px]">
+          {rawName}
+        </span>
+        {label && <span className="truncate text-foreground/80">{label}</span>}
+        {hasDetail && (
+          <ChevronRight className={cn("ml-auto size-3 shrink-0 transition-transform", expanded && "rotate-90")} />
+        )}
+      </button>
+      {expanded && (
+        <pre className="ml-5 mt-1 mb-1 max-h-48 overflow-auto rounded-lg bg-muted/40 p-3 font-mono text-[11px] text-muted-foreground">
+          {JSON.stringify(input, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function ToolGroup({ tools }: { tools: TranscriptEvent[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const label = summarizeToolGroup(tools);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="group flex cursor-pointer items-center gap-1.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span>{label}</span>
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 transition-all",
+            expanded ? "rotate-90 opacity-100" : "opacity-0 group-hover:opacity-100",
+          )}
         />
       </button>
       {expanded && (
-        <div className="mt-2 space-y-1 border-l-2 border-border pl-3">
-          {tools.map((ev) => {
-            const name =
-              typeof ev.payload.name === "string"
-                ? ev.payload.name
-                : ev.type.replace("agent.", "");
-            return (
-              <div key={ev.id} className="flex items-center gap-2 py-0.5">
-                <Check className="size-3.5 text-emerald-500" />
-                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                  task
-                </span>
-                <span className="text-sm">{name}</span>
-              </div>
-            );
-          })}
+        <div className="ml-1.5 border-l border-border/40 pl-2 pt-0.5 pb-1">
+          {tools.map((ev) => (
+            <ToolCallItem key={ev.id} ev={ev} />
+          ))}
         </div>
       )}
     </div>
   );
 }
+
+/* ---------- Skeleton ---------- */
+
+function ChatSkeleton() {
+  return (
+    <div className="mx-auto max-w-3xl space-y-4 px-6 py-6">
+      <div className="flex justify-end">
+        <div className="h-10 w-48 animate-pulse rounded-lg bg-muted/30" />
+      </div>
+      <div className="space-y-2">
+        <div className="h-4 w-3/4 animate-pulse rounded bg-muted/25" />
+        <div className="h-4 w-1/2 animate-pulse rounded bg-muted/25" />
+      </div>
+      <div className="h-3 w-36 animate-pulse rounded bg-muted/20" />
+      <div className="space-y-2">
+        <div className="h-4 w-5/6 animate-pulse rounded bg-muted/25" />
+        <div className="h-4 w-2/3 animate-pulse rounded bg-muted/25" />
+        <div className="h-4 w-3/4 animate-pulse rounded bg-muted/25" />
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Event grouping ---------- */
 
 const HIDDEN_TYPES = new Set([
   "span.model_request_start",
@@ -202,6 +334,8 @@ function groupEvents(events: TranscriptEvent[]) {
   return groups;
 }
 
+/* ---------- Main panel ---------- */
+
 export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [events, setEvents] = useState<TranscriptEvent[]>([]);
   const [tailing, setTailing] = useState(false);
@@ -210,6 +344,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const optimisticTailing = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -227,8 +362,22 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         events: TranscriptEvent[];
         tailing: boolean;
       };
-      setEvents(data.events);
-      setTailing(data.tailing);
+      setEvents((prev) => {
+        const optimistic = prev.filter((e) => e.id.startsWith("optimistic-"));
+        if (optimistic.length === 0) return data.events;
+        const serverTexts = new Set(
+          data.events
+            .filter((e) => e.type === "user.message")
+            .map((e) => textFromContent(e.payload.content)),
+        );
+        const stillPending = optimistic.filter(
+          (e) => !serverTexts.has(textFromContent(e.payload.content)),
+        );
+        return stillPending.length > 0
+          ? [...data.events, ...stillPending]
+          : data.events;
+      });
+      setTailing(data.tailing || optimisticTailing.current);
       setTitle(data.title);
       setError(null);
     } catch (e) {
@@ -250,13 +399,28 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [events.length, tailing]);
+  }, [events.length, tailing, sending]);
 
   async function handleSend() {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
+    optimisticTailing.current = true;
+    setTailing(true);
     setError(null);
+
+    const optimisticId = `optimistic-${Date.now()}`;
+    setEvents((prev) => [
+      ...prev,
+      {
+        id: optimisticId,
+        type: "user.message",
+        payload: { content: [{ type: "text", text: trimmed }] },
+        occurredAt: new Date().toISOString(),
+      },
+    ]);
+    setText("");
+
     try {
       const res = await fetch("/api/managed-agents/message", {
         method: "POST",
@@ -267,10 +431,12 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Send failed");
       }
-      setText("");
-      await poll();
+      optimisticTailing.current = false;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Send failed");
+      optimisticTailing.current = false;
+      setTailing(false);
+      setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
     } finally {
       setSending(false);
     }
@@ -280,66 +446,77 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 items-center border-b border-border px-6 py-3">
-        <h1 className="text-sm font-semibold">
-          {title && title !== "New chat" ? title : "New Session"}
-        </h1>
+      <header className="flex h-14 shrink-0 items-center border-b border-border/70 px-6">
+        {loading ? (
+          <div className="h-5 w-48 animate-pulse rounded bg-muted/40" />
+        ) : (
+          <h1 className="text-sm font-semibold">
+            {title && title !== "New chat" ? title : "New Session"}
+          </h1>
+        )}
       </header>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-6 py-6">
-          <div className="flex flex-col gap-5">
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {grouped.map((group, idx) => {
-              if (group.kind === "tools") {
-                return <ToolGroup key={idx} tools={group.events} />;
-              }
-              const ev = group.event;
-              const { type, payload } = ev;
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        {loading ? (
+          <ChatSkeleton />
+        ) : (
+          <div className="mx-auto max-w-3xl px-6 py-6">
+            <div className="flex flex-col gap-4">
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              {grouped.map((group, idx) => {
+                if (group.kind === "tools") {
+                  return <ToolGroup key={idx} tools={group.events} />;
+                }
+                const ev = group.event;
+                const { type, payload } = ev;
 
-              if (type === "user.message") {
-                const msg = textFromContent(payload.content);
-                return (
-                  <div key={ev.id} className="flex items-start justify-end gap-3">
-                    <div className="rounded-2xl bg-foreground/90 px-4 py-2.5 text-background">
-                      <p className="text-sm">{msg || "(empty)"}</p>
+                if (type === "user.message") {
+                  const msg = textFromContent(payload.content);
+                  return (
+                    <div key={ev.id} className="flex justify-end">
+                      <div className="max-w-[85%]">
+                        <div className="rounded-lg border border-border/60 bg-muted/60 px-3 py-2 text-sm leading-relaxed">
+                          <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                );
-              }
+                  );
+                }
 
-              if (type === "agent.message") {
-                const msg = textFromContent(payload.content);
-                if (!msg) return null;
-                return (
-                  <div key={ev.id}>
-                    <SimpleMarkdown text={msg} />
-                  </div>
-                );
-              }
+                if (type === "agent.message") {
+                  const msg = textFromContent(payload.content);
+                  if (!msg) return null;
+                  return (
+                    <div key={ev.id} className="max-w-none overflow-x-auto">
+                      <SimpleMarkdown text={msg} />
+                    </div>
+                  );
+                }
 
-              if (type === "session.status_idle") {
-                return (
-                  <div key={ev.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
-                    <p className="text-xs font-medium text-amber-500">Requires action</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      This session needs confirmation in the Anthropic console.
-                    </p>
-                  </div>
-                );
-              }
+                if (type === "session.status_idle") {
+                  return (
+                    <div key={ev.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                      <p className="text-xs font-medium text-amber-500">Requires action</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        This session needs confirmation in the Anthropic console.
+                      </p>
+                    </div>
+                  );
+                }
 
-              return null;
-            })}
-            {tailing && (
-              <div className="flex items-center gap-2 py-1">
-                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Thinking...</span>
-              </div>
-            )}
-            <div ref={bottomRef} />
+                return null;
+              })}
+              {(tailing || sending) && (
+                <div className="pt-3" role="status" aria-live="polite">
+                  <div className="py-1 text-sm font-medium shimmer-text">
+                    Thinking...
+                  </div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="shrink-0 px-4 pb-4">
@@ -372,7 +549,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 aria-label="Send message"
                 onClick={() => void handleSend()}
                 disabled={sending || !text.trim()}
-                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-30 disabled:cursor-default"
+                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-30"
               >
                 {sending ? (
                   <Loader2 className="size-3.5 animate-spin" />
