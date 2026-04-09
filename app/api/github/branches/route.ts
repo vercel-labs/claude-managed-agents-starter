@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { requireUserId } from "@/lib/session";
 import { getGithubTokenForUser } from "@/lib/get-github-token";
+import { orderBranchOptions } from "@/lib/branches";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export async function GET(request: NextRequest) {
 
   const owner = request.nextUrl.searchParams.get("owner");
   const repo = request.nextUrl.searchParams.get("repo");
+  const defaultBranch = request.nextUrl.searchParams.get("defaultBranch");
   if (!owner || !repo) {
     return NextResponse.json(
       { error: "owner and repo are required" },
@@ -42,17 +44,11 @@ export async function GET(request: NextRequest) {
         { status: 502 },
       );
     }
-    const branches = (await res.json()) as Array<{
-      name: string;
-      protected: boolean;
-    }>;
+    const raw = (await res.json()) as Array<{ name: string }>;
+    const names = raw.map((b) => b.name);
+    const branches = orderBranchOptions(names, defaultBranch);
 
-    return NextResponse.json(
-      branches.map((b) => ({
-        name: b.name,
-        protected: b.protected,
-      })),
-    );
+    return NextResponse.json({ branches });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to fetch branches" },

@@ -9,9 +9,9 @@ import {
   isTerminalManagedAgentEvent,
 } from "@/lib/managed-agent-events";
 
-const MAX_POLLS = 120;
+const MAX_POLLS = 500;
 const POLL_INTERVAL_MS = 3_000;
-const IDLE_POLLS_BEFORE_EXIT = 10;
+const IDLE_POLLS_BEFORE_EXIT = 60;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -120,6 +120,13 @@ async function pollAndPersistStep(input: {
     }
 
     if (idleCount >= IDLE_POLLS_BEFORE_EXIT && attempt > IDLE_POLLS_BEFORE_EXIT) {
+      try {
+        const session = await client.beta.sessions.retrieve(anthropicSessionId);
+        if (session.status === "running") {
+          idleCount = 0;
+          continue;
+        }
+      } catch {}
       return;
     }
   }

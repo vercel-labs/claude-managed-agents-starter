@@ -5,6 +5,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -15,6 +16,7 @@ export const user = pgTable("user", {
   image: text("image"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
+  vaultId: text("vault_id"),
 });
 
 export const session = pgTable("session", {
@@ -73,6 +75,41 @@ export const managedAgentSession = pgTable("managed_agent_session", {
   repoName: text("repo_name"),
   baseBranch: text("base_branch"),
 });
+
+export const mcpOAuthClient = pgTable("mcp_oauth_client", {
+  serverName: text("server_name").primaryKey(),
+  clientId: text("client_id").notNull(),
+  clientSecret: text("client_secret"),
+  registeredAt: timestamp("registered_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const mcpOAuthToken = pgTable(
+  "mcp_oauth_token",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    serverName: text("server_name").notNull(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    userServerUnique: uniqueIndex("mcp_oauth_token_user_server").on(
+      t.userId,
+      t.serverName,
+    ),
+  }),
+);
 
 export const managedAgentEvent = pgTable(
   "managed_agent_event",

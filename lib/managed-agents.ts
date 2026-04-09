@@ -1,6 +1,20 @@
 import { getAnthropic } from "./anthropic";
 
-export function getManagedAgentConfig(): { agentId: string; environmentId: string } {
+interface MCPServerDef {
+  name: string;
+  url: string;
+}
+
+const REQUIRED_MCP_SERVERS: MCPServerDef[] = [
+  { name: "github", url: "https://api.githubcopilot.com/mcp/" },
+  { name: "notion", url: "https://mcp.notion.com/mcp" },
+  { name: "slack", url: "https://mcp.slack.com/mcp" },
+];
+
+export function getManagedAgentConfig(): {
+  agentId: string;
+  environmentId: string;
+} {
   const agentId = process.env.ANTHROPIC_AGENT_ID?.trim();
   const environmentId = process.env.ANTHROPIC_ENVIRONMENT_ID?.trim();
   if (!agentId || !environmentId) {
@@ -11,39 +25,94 @@ export function getManagedAgentConfig(): { agentId: string; environmentId: strin
   return { agentId, environmentId };
 }
 
-let _codingEnvironmentId: string | null = null;
-
-export async function getOrCreateCodingEnvironment(): Promise<string> {
-  if (_codingEnvironmentId) return _codingEnvironmentId;
-
+export async function ensureAgentMCPs(): Promise<void> {
   const client = getAnthropic();
-  const envName = "coding-agent-env";
+  const { agentId } = getManagedAgentConfig();
+  const agent = await client.beta.agents.retrieve(agentId);
 
-  for await (const env of client.beta.environments.list()) {
-    if (env.name === envName && !env.archived_at) {
-      _codingEnvironmentId = env.id;
-      return env.id;
-    }
-  }
+  const existingServerNames = new Set(agent.mcp_servers.map((s) => s.name));
+  const missingServers = REQUIRED_MCP_SERVERS.filter(
+    (s) => !existingServerNames.has(s.name),
+  );
 
-  const env = await client.beta.environments.create({
-    name: envName,
-    description: "Coding agent with GitHub access, git, and curl",
-    config: {
-      type: "cloud",
-      networking: {
-        type: "limited",
-        allowed_hosts: ["github.com", "*.github.com", "api.github.com"],
-        allow_package_managers: true,
-      },
-      packages: {
-        apt: ["git", "curl", "jq"],
-      },
-    },
+  const toolsNeedingUpdate = REQUIRED_MCP_SERVERS.filter((s) => {
+    const toolset = agent.tools.find(
+      (t): t is Extract<typeof t, { type: "mcp_toolset" }> =>
+        t.type === "mcp_toolset" && t.mcp_server_name === s.name,
+    );
+    if (!toolset) return true;
+    return toolset.default_config.permission_policy?.type !== "always_allow";
   });
 
-  _codingEnvironmentId = env.id;
-  return env.id;
+  if (missingServers.length === 0 && toolsNeedingUpdate.length === 0) return;
+
+  type ToolParam = NonNullable<
+    Parameters<typeof client.beta.agents.update>[1]["tools"]
+  >[number];
+
+  const mcp_servers =
+    missingServers.length === 0
+      ? undefined
+      : [
+          ...agent.mcp_servers.map((s) => ({
+            name: s.name,
+            type: "url" as const,
+            url: s.url,
+          })),
+          ...missingServers.map((s) => ({
+            name: s.name,
+            type: "url" as const,
+            url: s.url,
+          })),
+        ];
+
+  const requiredNames = new Set(REQUIRED_MCP_SERVERS.map((s) => s.name));
+  const tools =
+    toolsNeedingUpdate.length === 0
+      ? undefined
+      : [
+          ...agent.tools
+            .filter(
+              (t) =>
+                !(
+                  t.type === "mcp_toolset" &&
+                  requiredNames.has(t.mcp_server_name)
+                ),
+            )
+            .map((t): ToolParam => {
+              switch (t.type) {
+                case "mcp_toolset":
+                  return {
+                    type: "mcp_toolset" as const,
+                    mcp_server_name: t.mcp_server_name,
+                    default_config: { enabled: t.default_config.enabled },
+                  };
+                case "custom":
+                  return {
+                    type: "custom" as const,
+                    name: t.name,
+                    description: t.description,
+                    input_schema: t.input_schema,
+                  };
+                case "agent_toolset_20260401":
+                  return { type: "agent_toolset_20260401" as const };
+              }
+            }),
+          ...REQUIRED_MCP_SERVERS.map((s) => ({
+            type: "mcp_toolset" as const,
+            mcp_server_name: s.name,
+            default_config: {
+              enabled: true,
+              permission_policy: { type: "always_allow" as const },
+            },
+          })),
+        ];
+
+  await client.beta.agents.update(agentId, {
+    version: agent.version,
+    ...(mcp_servers && { mcp_servers }),
+    ...(tools && { tools }),
+  });
 }
 
 export async function createAnthropicManagedSession() {
@@ -60,13 +129,16 @@ export async function createAnthropicManagedSession() {
   };
 }
 
-export async function createCodingSession() {
+export async function createCodingSession(vaultIds: string[]) {
   const client = getAnthropic();
-  const { agentId } = getManagedAgentConfig();
-  const environmentId = await getOrCreateCodingEnvironment();
+  const { agentId, environmentId } = getManagedAgentConfig();
+
+  await ensureAgentMCPs();
+
   const session = await client.beta.sessions.create({
     agent: agentId,
     environment_id: environmentId,
+    vault_ids: vaultIds,
   });
   return {
     anthropicSessionId: session.id,
@@ -75,55 +147,10 @@ export async function createCodingSession() {
   };
 }
 
-export function buildCodingPreamble(opts: {
-  token: string;
-  owner: string;
-  repo: string;
-  baseBranch: string;
-  gitName: string;
-  gitEmail: string;
-}): string {
-  const cloneUrl = `https://x-access-token:${opts.token}@github.com/${opts.owner}/${opts.repo}.git`;
-  return [
-    `<repository_context>`,
-    `Repository: ${opts.owner}/${opts.repo}`,
-    `Base branch: ${opts.baseBranch}`,
-    `Clone URL (includes auth): ${cloneUrl}`,
-    ``,
-    `Setup instructions (run these first):`,
-    `\`\`\`bash`,
-    `git clone ${cloneUrl} /home/user/repo`,
-    `cd /home/user/repo`,
-    `git checkout ${opts.baseBranch}`,
-    `git config user.name "${opts.gitName}"`,
-    `git config user.email "${opts.gitEmail}"`,
-    `\`\`\``,
-    ``,
-    `Workflow:`,
-    `1. Clone the repo and check out the base branch`,
-    `2. Create a new branch for your changes: \`git checkout -b <descriptive-branch-name>\``,
-    `3. Make the requested code changes`,
-    `4. Commit with meaningful messages`,
-    `5. Push the branch: \`git push -u origin HEAD\``,
-    `6. Create a PR using curl:`,
-    `\`\`\`bash`,
-    `curl -s -X POST "https://api.github.com/repos/${opts.owner}/${opts.repo}/pulls" \\`,
-    `  -H "Authorization: Bearer ${opts.token}" \\`,
-    `  -H "Accept: application/vnd.github.v3+json" \\`,
-    `  -d '{`,
-    `    "title": "<PR title>",`,
-    `    "body": "<PR description>",`,
-    `    "head": "<your-branch-name>",`,
-    `    "base": "${opts.baseBranch}"`,
-    `  }'`,
-    `\`\`\``,
-    ``,
-    `Always create a PR after making changes unless explicitly told otherwise.`,
-    `</repository_context>`,
-  ].join("\n");
-}
-
-export async function sendUserMessage(anthropicSessionId: string, text: string) {
+export async function sendUserMessage(
+  anthropicSessionId: string,
+  text: string,
+) {
   const client = getAnthropic();
   await client.beta.sessions.events.send(anthropicSessionId, {
     events: [

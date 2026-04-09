@@ -3,40 +3,37 @@ import type { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { managedAgentSession, managedAgentEvent } from "@/lib/schema";
-import {
-  createAnthropicManagedSession,
-  createCodingSession,
-} from "@/lib/managed-agents";
+import { createCodingSession } from "@/lib/managed-agents";
 import { requireUserId } from "@/lib/session";
+import { getOrCreateVaultForUser, syncMCPCredential } from "@/lib/vault";
+import { getUserToken, MCP_SERVERS } from "@/lib/mcp-oauth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   const authz = await requireUserId();
   if ("error" in authz) return authz.error;
 
-  let body: {
-    repoOwner?: string;
-    repoName?: string;
-    baseBranch?: string;
-  } = {};
-  try {
-    body = await request.json();
-  } catch {
-    // no body is fine for non-coding sessions
-  }
-
-  const isCoding = Boolean(body.repoOwner && body.repoName);
   const id = crypto.randomUUID();
 
   let anthropic;
   try {
-    anthropic = isCoding
-      ? await createCodingSession()
-      : await createAnthropicManagedSession();
+    const vaultId = await getOrCreateVaultForUser(authz.userId);
+
+    await Promise.all(
+      Object.entries(MCP_SERVERS).map(async ([name, info]) => {
+        const mcpToken = await getUserToken(authz.userId, name);
+        if (mcpToken) {
+          await syncMCPCredential(vaultId, name, info.url, mcpToken);
+        }
+      }),
+    );
+
+    anthropic = await createCodingSession([vaultId]);
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Failed to create session";
+    const message =
+      e instanceof Error ? e.message : "Failed to create session";
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
@@ -48,12 +45,10 @@ export async function POST(request: NextRequest) {
     agentId: anthropic.agentId,
     environmentId: anthropic.environmentId,
     tailing: false,
-    repoUrl: isCoding
-      ? `https://github.com/${body.repoOwner}/${body.repoName}`
-      : null,
-    repoOwner: body.repoOwner ?? null,
-    repoName: body.repoName ?? null,
-    baseBranch: body.baseBranch ?? null,
+    repoUrl: null,
+    repoOwner: null,
+    repoName: null,
+    baseBranch: null,
   });
 
   return NextResponse.json({ id });
