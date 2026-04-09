@@ -29,7 +29,6 @@ export const auth = betterAuth({
     errorURL: "/auth/error",
   },
   account: {
-    encryptOAuthTokens: true,
     accountLinking: {
       enabled: true,
       trustedProviders: ["vercel"],

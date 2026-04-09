@@ -23,6 +23,7 @@ export async function GET(request: Request) {
   const sessions = await db
     .select({
       id: managedAgentSession.id,
+      title: managedAgentSession.title,
       tailing: managedAgentSession.tailing,
     })
     .from(managedAgentSession)
@@ -53,6 +54,7 @@ export async function GET(request: Request) {
     .orderBy(asc(managedAgentEvent.occurredAt));
 
   return NextResponse.json({
+    title: sessionRow.title,
     tailing: sessionRow.tailing,
     events: events.map((e) => ({
       id: e.id,

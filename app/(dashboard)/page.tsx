@@ -1,16 +1,9 @@
-import { headers } from "next/headers";
+import { getSession } from "@/lib/session";
 import { NewChatComposer } from "./new-chat-composer";
 
 async function getIsAuthenticated() {
-  try {
-    const { auth } = await import("@/lib/auth");
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
-    return !!session?.user;
-  } catch {
-    return false;
-  }
+  const session = await getSession();
+  return !!session?.user;
 }
 
 export default async function HomePage() {

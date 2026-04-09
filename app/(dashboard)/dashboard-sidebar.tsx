@@ -179,23 +179,15 @@ export function DashboardSidebar({
                   suppressHydrationWarning
                 >
                   {formatTimeAgo(session.updatedAt)}
-                  {session.tailing && (
-                    <span className="ml-1.5 inline-flex items-center gap-1 text-emerald-500">
-                      <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                      running
-                    </span>
-                  )}
                 </div>
               </Link>
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 opacity-0 transition-opacity hover:bg-muted group-hover/session:opacity-100 data-[state=open]:opacity-100 cursor-pointer"
-                    aria-label="Session options"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Ellipsis className="size-3.5" />
-                  </button>
+                <DropdownMenuTrigger
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 opacity-0 transition-opacity hover:bg-muted group-hover/session:opacity-100 data-[popup-open]:opacity-100 cursor-pointer"
+                  aria-label="Session options"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Ellipsis className="size-3.5" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" side="bottom">
                   <DropdownMenuItem

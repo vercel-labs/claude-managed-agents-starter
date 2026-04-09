@@ -1,15 +1,12 @@
-import { headers } from "next/headers";
 import { eq, desc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { managedAgentSession } from "@/lib/schema";
+import { getSession } from "@/lib/session";
 import { DashboardShell } from "./dashboard-shell";
 
 async function getViewerAndSessions() {
   try {
-    const session = await auth.api.getSession({
-      headers: await headers(),
-    });
+    const session = await getSession();
     if (!session?.user?.id) return { viewer: null, sessions: [] };
 
     const viewer = {
