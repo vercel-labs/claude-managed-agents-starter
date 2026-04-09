@@ -1,0 +1,66 @@
+import { and, asc, eq } from "drizzle-orm";
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { managedAgentEvent, managedAgentSession } from "@/lib/schema";
+import { requireUserId } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export async function GET(request: Request) {
+  const authz = await requireUserId();
+  if ("error" in authz) return authz.error;
+
+  const { searchParams } = new URL(request.url);
+  const sessionId = searchParams.get("sessionId")?.trim();
+  if (!sessionId) {
+    return NextResponse.json(
+      { error: "sessionId query parameter is required" },
+      { status: 400 },
+    );
+  }
+
+  const sessions = await db
+    .select({
+      id: managedAgentSession.id,
+      tailing: managedAgentSession.tailing,
+    })
+    .from(managedAgentSession)
+    .where(
+      and(
+        eq(managedAgentSession.id, sessionId),
+        eq(managedAgentSession.userId, authz.userId),
+      ),
+    )
+    .limit(1);
+
+  const sessionRow = sessions[0];
+  if (!sessionRow) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  const events = await db
+    .select({
+      id: managedAgentEvent.id,
+      anthropicEventId: managedAgentEvent.anthropicEventId,
+      type: managedAgentEvent.type,
+      payload: managedAgentEvent.payload,
+      processedAt: managedAgentEvent.processedAt,
+      occurredAt: managedAgentEvent.occurredAt,
+    })
+    .from(managedAgentEvent)
+    .where(eq(managedAgentEvent.sessionId, sessionId))
+    .orderBy(asc(managedAgentEvent.occurredAt));
+
+  return NextResponse.json({
+    tailing: sessionRow.tailing,
+    events: events.map((e) => ({
+      id: e.id,
+      anthropicEventId: e.anthropicEventId,
+      type: e.type,
+      payload: e.payload,
+      processedAt: e.processedAt?.toISOString() ?? null,
+      occurredAt: e.occurredAt.toISOString(),
+    })),
+  });
+}

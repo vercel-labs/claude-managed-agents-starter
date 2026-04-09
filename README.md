@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Claude Managed Agents (Vercel Labs)
 
-## Getting Started
+Demo app for [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/quickstart): create sessions, send `user.message` events, and **tail** new events with [Vercel Workflow](https://useworkflow.dev) (`sleep` + polled `events.list`). The browser only reads **Neon** via `GET /api/managed-agents/transcript` (no Anthropic on that path).
 
-First, run the development server:
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel-labs/claude-managed-agents)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+**Template / project:** [vercel.com/vercel-labs/claude-managed-agents](https://vercel.com/vercel-labs/claude-managed-agents)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Stack
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Layer | Choice |
+| --- | --- |
+| App | Next.js 16 (App Router), React 19 |
+| UI | [shadcn/ui](https://ui.shadcn.com), Tailwind CSS v4 |
+| Auth | [Better Auth](https://www.better-auth.com) + [Sign in with Vercel](https://vercel.com/docs/sign-in-with-vercel/getting-started) |
+| Data | [Neon](https://neon.tech) + [Drizzle ORM](https://orm.drizzle.team) |
+| Background | [Workflow DevKit](https://useworkflow.dev) — `app/workflows/tail-session.ts` |
+| Agents API | `@anthropic-ai/sdk` — `beta.sessions` / `events.send` / `events.list` |
+| Package manager | [pnpm](https://pnpm.io) (see `packageManager` in `package.json`) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Product behavior
 
-## Learn More
+- **Routes:** `/login`, `/chat`, `/chat/[sessionId]`. Sidebar lists your sessions (from `GET /api/managed-agents/sessions`); **New chat** creates a row and navigates to the new id.
+- **Messaging:** `POST /api/managed-agents/message` calls Anthropic `events.send`, bumps `updatedAt`, acquires a **tail lock** (`tailing = true` only if it was `false`), and starts `tailSessionWorkflow` when the lock is acquired.
+- **Tail workflow:** A step lists events (desc, paginated), inserts into Postgres with a **unique** `(sessionId, anthropicEventId)` dedupe, updates `updatedAt` when new rows appear, and stops when it sees a **terminal** idle/terminated/deleted/error event—then clears `tailing`.
+- **Transcript UI:** Polls `GET /api/managed-agents/transcript?sessionId=` (faster interval while `tailing` is true).
 
-To learn more about Next.js, take a look at the following resources:
+## Local setup
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Use [pnpm](https://pnpm.io). With [Corepack](https://nodejs.org/api/corepack.html): `corepack enable` (Node 16.13+), then the `packageManager` field in `package.json` selects the right pnpm version.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. **Clone & install**
 
-## Deploy on Vercel
+   ```bash
+   pnpm install
+   ```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+2. **Environment** — copy `.env.example` to `.env.local` and set variables (see [docs/AUTH.md](./docs/AUTH.md) for Sign in with Vercel). In production, set a strong `BETTER_AUTH_SECRET` (never rely on the dev fallback in `lib/auth.ts`).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+3. **Database** — push Drizzle schema to Neon:
+
+   ```bash
+   pnpm db:push
+   ```
+
+4. **Dev server**
+
+   ```bash
+   pnpm dev
+   ```
+
+5. Open [http://localhost:3000](http://localhost:3000) → sign in → use **New chat** and the composer.
+
+Use the same **callback URL** origin as `BETTER_AUTH_URL` (e.g. `http://localhost:3000`) in your Vercel OAuth app settings.
+
+## Scripts
+
+- `pnpm dev` — Next.js dev (Workflow local data under `.next/workflow-data`)
+- `pnpm build` / `pnpm start` — production
+- `pnpm db:generate` — Drizzle migrations (optional)
+- `pnpm db:push` — apply schema to `DATABASE_URL`
+
+## References
+
+- [Managed Agents quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart)
+- [Workflow Next.js setup](https://useworkflow.dev/docs/getting-started/next)
