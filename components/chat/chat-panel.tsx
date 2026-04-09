@@ -26,7 +26,7 @@ function textFromContent(content: unknown): string {
       parts.push((block as { text: string }).text);
     }
   }
-  return parts.join("\n");
+  return parts.join("");
 }
 
 /* ---------- Markdown ---------- */
