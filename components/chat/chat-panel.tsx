@@ -377,7 +377,21 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           ? [...data.events, ...stillPending]
           : data.events;
       });
-      setTailing(data.tailing || optimisticTailing.current);
+      const lastUserIdx = data.events.findLastIndex(
+        (e) => e.type === "user.message",
+      );
+      const terminalAfterUser = data.events.some(
+        (e, i) =>
+          i > lastUserIdx &&
+          (e.type === "session.status_idle" ||
+            e.type === "session.status_terminated" ||
+            e.type === "session.error"),
+      );
+      setTailing(
+        terminalAfterUser
+          ? false
+          : data.tailing || optimisticTailing.current,
+      );
       setTitle(data.title);
       setError(null);
     } catch (e) {
@@ -506,7 +520,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
                 return null;
               })}
-              {(tailing || sending) && (
+              {(tailing || sending) &&
+                events.some((e) => e.type === "user.message") && (
                 <div className="pt-3" role="status" aria-live="polite">
                   <div className="py-1 text-sm font-medium shimmer-text">
                     Thinking...
@@ -533,7 +548,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
               }}
               placeholder="Message the agent..."
               rows={1}
-              disabled={sending}
+              disabled={sending || tailing}
               className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
               style={{ height: "auto", overflow: "hidden" }}
               onInput={(e) => {
