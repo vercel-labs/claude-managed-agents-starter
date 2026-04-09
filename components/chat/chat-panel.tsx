@@ -191,7 +191,7 @@ function ToolCallItem({ ev }: { ev: TranscriptEvent }) {
   const rawName = typeof ev.payload.name === "string" ? ev.payload.name : ev.type.replace("agent.", "");
   const input = ev.payload.input;
   const label = describeToolAction(rawName, input);
-  const hasDetail = input && typeof input === "object" && Object.keys(input as object).length > 0;
+  const hasDetail = Boolean(input && typeof input === "object" && Object.keys(input as object).length > 0);
 
   return (
     <div className="py-0.5">
