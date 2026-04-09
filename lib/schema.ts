@@ -80,6 +80,8 @@ export const mcpOAuthClient = pgTable("mcp_oauth_client", {
   serverName: text("server_name").primaryKey(),
   clientId: text("client_id").notNull(),
   clientSecret: text("client_secret"),
+  redirectUri: text("redirect_uri"),
+  fromEnv: boolean("from_env").notNull().default(false),
   registeredAt: timestamp("registered_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

@@ -68,20 +68,6 @@ export async function getOrRegisterClient(
   metadata: OAuthMetadata,
   redirectUri: string,
 ): Promise<ClientRegistration> {
-  const [existing] = await db
-    .select()
-    .from(mcpOAuthClient)
-    .where(eq(mcpOAuthClient.serverName, serverName))
-    .limit(1);
-
-  if (existing) {
-    return {
-      client_id: existing.clientId,
-      client_secret: existing.clientSecret ?? undefined,
-      redirect_uris: [redirectUri],
-    };
-  }
-
   const envPrefix = `MCP_OAUTH_${serverName.toUpperCase()}`;
   const envClientId =
     process.env[`${envPrefix}_CLIENT_ID`] ??
@@ -97,6 +83,8 @@ export async function getOrRegisterClient(
         serverName,
         clientId: envClientId,
         clientSecret: envClientSecret ?? null,
+        redirectUri: null,
+        fromEnv: true,
         registeredAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -104,12 +92,27 @@ export async function getOrRegisterClient(
         set: {
           clientId: envClientId,
           clientSecret: envClientSecret ?? null,
+          fromEnv: true,
         },
       });
 
     return {
       client_id: envClientId,
       client_secret: envClientSecret,
+      redirect_uris: [redirectUri],
+    };
+  }
+
+  const [existing] = await db
+    .select()
+    .from(mcpOAuthClient)
+    .where(eq(mcpOAuthClient.serverName, serverName))
+    .limit(1);
+
+  if (existing && (existing.fromEnv || existing.redirectUri === redirectUri)) {
+    return {
+      client_id: existing.clientId,
+      client_secret: existing.clientSecret ?? undefined,
       redirect_uris: [redirectUri],
     };
   }
@@ -145,12 +148,26 @@ export async function getOrRegisterClient(
     client_secret?: string;
   };
 
-  await db.insert(mcpOAuthClient).values({
-    serverName,
-    clientId: reg.client_id,
-    clientSecret: reg.client_secret ?? null,
-    registeredAt: new Date(),
-  });
+  await db
+    .insert(mcpOAuthClient)
+    .values({
+      serverName,
+      clientId: reg.client_id,
+      clientSecret: reg.client_secret ?? null,
+      redirectUri,
+      fromEnv: false,
+      registeredAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: mcpOAuthClient.serverName,
+      set: {
+        clientId: reg.client_id,
+        clientSecret: reg.client_secret ?? null,
+        redirectUri,
+        fromEnv: false,
+        registeredAt: new Date(),
+      },
+    });
 
   return {
     client_id: reg.client_id,
