@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronRight, Loader2 } from "lucide-react";
+import { Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
+import { consumePendingMessage } from "@/lib/pending-message";
 
 type TranscriptEvent = {
   id: string;
@@ -29,88 +31,20 @@ function textFromContent(content: unknown): string {
 
 /* ---------- Markdown ---------- */
 
-function SimpleMarkdown({ text }: { text: string }) {
-  const lines = text.split("\n");
-  const elements: React.ReactNode[] = [];
-  let i = 0;
+const streamdownComponents: Components = {
+  p: ({ children, ...props }) => (
+    <div {...props} className="mb-4 last:mb-0">
+      {children}
+    </div>
+  ),
+};
 
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.startsWith("```")) {
-      const lang = line.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++;
-      elements.push(
-        <div key={elements.length} className="my-3 overflow-hidden rounded-lg border border-border bg-muted/50">
-          {lang && (
-            <div className="border-b border-border px-4 py-1.5 text-[11px] text-muted-foreground">
-              {lang}
-            </div>
-          )}
-          <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed">
-            <code>{codeLines.join("\n")}</code>
-          </pre>
-        </div>,
-      );
-      continue;
-    }
-
-    if (line.trim() === "") {
-      elements.push(<div key={elements.length} className="h-3" />);
-      i++;
-      continue;
-    }
-
-    elements.push(
-      <p key={elements.length} className="text-sm leading-relaxed">
-        {renderInline(line)}
-      </p>,
-    );
-    i++;
-  }
-
-  return <>{elements}</>;
-}
-
-function renderInline(text: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  const regex = /(\*\*(.+?)\*\*)|(`([^`]+?)`)|(\[([^\]]+)\]\(([^)]+)\))/g;
-  let lastIndex = 0;
-  let match;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-    if (match[2]) {
-      nodes.push(<strong key={match.index} className="font-semibold">{match[2]}</strong>);
-    } else if (match[4]) {
-      nodes.push(
-        <code key={match.index} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[13px]">
-          {match[4]}
-        </code>,
-      );
-    } else if (match[6] && match[7]) {
-      nodes.push(
-        <a key={match.index} href={match[7]} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline underline-offset-2 hover:text-blue-300">
-          {match[6]}
-        </a>,
-      );
-    }
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes;
+function Markdown({ text }: { text: string }) {
+  return (
+    <Streamdown components={streamdownComponents} linkSafety={{ enabled: false }}>
+      {text}
+    </Streamdown>
+  );
 }
 
 /* ---------- Tool categorization ---------- */
@@ -337,16 +271,30 @@ function groupEvents(events: TranscriptEvent[]) {
 /* ---------- Main panel ---------- */
 
 export function ChatPanel({ sessionId }: { sessionId: string }) {
-  const [events, setEvents] = useState<TranscriptEvent[]>([]);
-  const [tailing, setTailing] = useState(false);
+  const [pending] = useState(() => consumePendingMessage(sessionId));
+  const [events, setEvents] = useState<TranscriptEvent[]>(() => {
+    if (!pending) return [];
+    return [
+      {
+        id: "optimistic-initial",
+        type: "user.message",
+        payload: { content: [{ type: "text", text: pending }] },
+        occurredAt: new Date().toISOString(),
+      },
+    ];
+  });
+  const [tailing, setTailing] = useState(!!pending);
   const [title, setTitle] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const optimisticTailing = useRef(false);
+  const optimisticTailing = useRef(!!pending);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastEventCountRef = useRef(0);
+  const staleTailingCountRef = useRef(0);
+  const STALE_TAILING_LIMIT = 24;
 
   const poll = useCallback(async () => {
     try {
@@ -387,8 +335,18 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             e.type === "session.status_terminated" ||
             e.type === "session.error"),
       );
+
+      if (data.events.length !== lastEventCountRef.current) {
+        lastEventCountRef.current = data.events.length;
+        staleTailingCountRef.current = 0;
+      } else if (data.tailing) {
+        staleTailingCountRef.current++;
+      }
+
+      const staleTimeout = staleTailingCountRef.current >= STALE_TAILING_LIMIT;
+
       setTailing(
-        terminalAfterUser
+        terminalAfterUser || staleTimeout
           ? false
           : data.tailing || optimisticTailing.current,
       );
@@ -420,6 +378,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     if (!trimmed || sending) return;
     setSending(true);
     optimisticTailing.current = true;
+    staleTailingCountRef.current = 0;
     setTailing(true);
     setError(null);
 
@@ -502,7 +461,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                   if (!msg) return null;
                   return (
                     <div key={ev.id} className="max-w-none overflow-x-auto">
-                      <SimpleMarkdown text={msg} />
+                      <Markdown text={msg} />
                     </div>
                   );
                 }

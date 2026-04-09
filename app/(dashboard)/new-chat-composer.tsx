@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { SignInModal } from "@/components/sign-in-modal";
+import { setPendingMessage } from "@/lib/pending-message";
 
 export function NewChatComposer({
   isAuthenticated = false,
@@ -50,6 +51,7 @@ export function NewChatComposer({
         return;
       }
       setPrompt("");
+      setPendingMessage(data.id, trimmed);
       router.push(`/chat/${data.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create session");

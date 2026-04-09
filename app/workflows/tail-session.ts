@@ -9,8 +9,9 @@ import {
   isTerminalManagedAgentEvent,
 } from "@/lib/managed-agent-events";
 
-const MAX_POLLS = 30;
+const MAX_POLLS = 120;
 const POLL_INTERVAL_MS = 3_000;
+const IDLE_POLLS_BEFORE_EXIT = 10;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -24,6 +25,7 @@ async function pollAndPersistStep(input: {
 
   const { internalSessionId, anthropicSessionId } = input;
   const client = getAnthropic();
+  let idleCount = 0;
 
   for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
     if (attempt > 0) {
@@ -99,10 +101,13 @@ async function pollAndPersistStep(input: {
     }
 
     if (insertedAny) {
+      idleCount = 0;
       await db
         .update(managedAgentSession)
         .set({ updatedAt: new Date() })
         .where(eq(managedAgentSession.id, internalSessionId));
+    } else {
+      idleCount++;
     }
 
     if (
@@ -111,6 +116,10 @@ async function pollAndPersistStep(input: {
       latestUserMessageTime > 0 &&
       latestTerminalTime > latestUserMessageTime
     ) {
+      return;
+    }
+
+    if (idleCount >= IDLE_POLLS_BEFORE_EXIT && attempt > IDLE_POLLS_BEFORE_EXIT) {
       return;
     }
   }
