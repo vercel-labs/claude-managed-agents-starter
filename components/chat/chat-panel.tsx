@@ -396,32 +396,24 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
               textFromContent(e.payload.content),
             ),
         );
+        if (stillPending.length === 0) {
+          optimisticTailing.current = false;
+        }
         return stillPending.length > 0
           ? [...data.events, ...stillPending]
           : data.events;
       });
-      const lastUserIdx = data.events.findLastIndex(
-        (e) => e.type === "user.message",
-      );
-      const terminalAfterUser = data.events.some(
-        (e, i) =>
-          i > lastUserIdx &&
-          (e.type === "session.status_idle" ||
-            e.type === "session.status_terminated" ||
-            e.type === "session.error"),
-      );
-
       if (data.events.length !== lastEventCountRef.current) {
         lastEventCountRef.current = data.events.length;
         staleTailingCountRef.current = 0;
-      } else if (data.tailing) {
+      } else {
         staleTailingCountRef.current++;
       }
 
       const staleTimeout = staleTailingCountRef.current >= STALE_TAILING_LIMIT;
 
       setTailing(
-        terminalAfterUser || staleTimeout
+        staleTimeout
           ? false
           : data.tailing || optimisticTailing.current,
       );
@@ -532,7 +524,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         </div>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          {loading ? (
+          {loading && !pending ? (
             <ChatSkeleton />
           ) : (
             <div className="mx-auto max-w-3xl space-y-2 pb-40">
