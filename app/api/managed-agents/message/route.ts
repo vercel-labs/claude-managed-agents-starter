@@ -3,9 +3,13 @@ import { NextResponse } from "next/server";
 import { start } from "workflow/api";
 import { db } from "@/lib/db";
 import { managedAgentSession } from "@/lib/schema";
-import { sendUserMessage } from "@/lib/managed-agents";
+import { sendUserMessage, buildCodingPreamble } from "@/lib/managed-agents";
 import { requireUserId } from "@/lib/session";
 import { tailSessionWorkflow } from "@/app/workflows/tail-session";
+import {
+  getGithubTokenForUser,
+  getGitHubIdentityForUser,
+} from "@/lib/get-github-token";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -46,17 +50,44 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
+  let messageText = text;
+
+  const isFirstMessage = row.title === "New chat";
+  const isCodingSession = Boolean(row.repoOwner && row.repoName);
+
+  if (isFirstMessage && isCodingSession) {
+    const token = await getGithubTokenForUser(authz.userId);
+    if (!token) {
+      return NextResponse.json(
+        { error: "GitHub token not found. Please connect GitHub first." },
+        { status: 400 },
+      );
+    }
+
+    const identity = await getGitHubIdentityForUser(authz.userId);
+    const preamble = buildCodingPreamble({
+      token,
+      owner: row.repoOwner!,
+      repo: row.repoName!,
+      baseBranch: row.baseBranch ?? "main",
+      gitName: identity?.name ?? "Coding Agent",
+      gitEmail:
+        identity?.email ?? "coding-agent@users.noreply.github.com",
+    });
+
+    messageText = `${preamble}\n\n${text}`;
+  }
+
   try {
-    await sendUserMessage(row.anthropicSessionId, text);
+    await sendUserMessage(row.anthropicSessionId, messageText);
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to send message";
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
-  const titleUpdate =
-    row.title === "New chat"
-      ? { title: text.length > 60 ? `${text.slice(0, 57)}…` : text }
-      : {};
+  const titleUpdate = isFirstMessage
+    ? { title: text.length > 60 ? `${text.slice(0, 57)}…` : text }
+    : {};
 
   await db
     .update(managedAgentSession)

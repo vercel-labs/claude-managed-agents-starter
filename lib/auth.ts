@@ -9,6 +9,10 @@ const vercelClientId = process.env.VERCEL_CLIENT_ID?.trim();
 const vercelClientSecret = process.env.VERCEL_CLIENT_SECRET?.trim();
 const vercelOAuthConfigured = Boolean(vercelClientId && vercelClientSecret);
 
+const githubClientId = process.env.GITHUB_CLIENT_ID?.trim();
+const githubClientSecret = process.env.GITHUB_CLIENT_SECRET?.trim();
+const githubOAuthConfigured = Boolean(githubClientId && githubClientSecret);
+
 const authSecret =
   process.env.BETTER_AUTH_SECRET?.trim() ??
   "development-only-better-auth-secret-min-32-chars!";
@@ -29,13 +33,22 @@ export const auth = betterAuth({
     errorURL: "/auth/error",
   },
   account: {
+    encryptOAuthTokens: true,
     accountLinking: {
       enabled: true,
-      trustedProviders: ["vercel"],
+      trustedProviders: ["vercel", "github"],
       allowDifferentEmails: true,
     },
   },
-  socialProviders: {},
+  socialProviders: githubOAuthConfigured
+    ? {
+        github: {
+          clientId: githubClientId!,
+          clientSecret: githubClientSecret!,
+          scope: ["read:user", "user:email", "repo", "read:org"],
+        },
+      }
+    : {},
   plugins: [
     ...(vercelOAuthConfigured
       ? [

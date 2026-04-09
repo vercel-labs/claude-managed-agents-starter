@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Check, ChevronRight, ExternalLink, GitPullRequest, Loader2 } from "lucide-react";
 import { Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
 import { consumePendingMessage } from "@/lib/pending-message";
@@ -29,6 +29,13 @@ function textFromContent(content: unknown): string {
   return parts.join("");
 }
 
+function stripPreamble(text: string): string {
+  const preambleEnd = "</repository_context>";
+  const idx = text.indexOf(preambleEnd);
+  if (idx === -1) return text;
+  return text.slice(idx + preambleEnd.length).trim();
+}
+
 /* ---------- Markdown ---------- */
 
 const streamdownComponents: Components = {
@@ -44,6 +51,64 @@ function Markdown({ text }: { text: string }) {
     <Streamdown components={streamdownComponents} linkSafety={{ enabled: false }}>
       {text}
     </Streamdown>
+  );
+}
+
+/* ---------- PR detection ---------- */
+
+const PR_URL_REGEX = /https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/g;
+
+interface DetectedPR {
+  url: string;
+  owner: string;
+  repo: string;
+  number: number;
+}
+
+function extractPRsFromEvents(events: TranscriptEvent[]): DetectedPR[] {
+  const seen = new Set<string>();
+  const prs: DetectedPR[] = [];
+
+  for (const ev of events) {
+    const text = JSON.stringify(ev.payload);
+    let match;
+    PR_URL_REGEX.lastIndex = 0;
+    while ((match = PR_URL_REGEX.exec(text)) !== null) {
+      const url = match[0];
+      if (seen.has(url)) continue;
+      seen.add(url);
+      prs.push({
+        url,
+        owner: match[1],
+        repo: match[2],
+        number: parseInt(match[3], 10),
+      });
+    }
+  }
+  return prs;
+}
+
+function PRCard({ pr }: { pr: DetectedPR }) {
+  return (
+    <a
+      href={pr.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/10"
+    >
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
+        <GitPullRequest className="size-4 text-emerald-500" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">
+          Pull Request #{pr.number}
+        </p>
+        <p className="truncate text-xs text-muted-foreground">
+          {pr.owner}/{pr.repo}
+        </p>
+      </div>
+      <ExternalLink className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+    </a>
   );
 }
 
@@ -416,6 +481,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   }
 
   const grouped = groupEvents(events);
+  const detectedPRs = useMemo(() => extractPRsFromEvents(events), [events]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -444,7 +510,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 const { type, payload } = ev;
 
                 if (type === "user.message") {
-                  const msg = textFromContent(payload.content);
+                  const rawMsg = textFromContent(payload.content);
+                  const msg = stripPreamble(rawMsg);
                   return (
                     <div key={ev.id} className="flex justify-end">
                       <div className="max-w-[85%]">
@@ -479,6 +546,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
                 return null;
               })}
+              {detectedPRs.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {detectedPRs.map((pr) => (
+                    <PRCard key={pr.url} pr={pr} />
+                  ))}
+                </div>
+              )}
               {(tailing || sending) &&
                 events.some((e) => e.type === "user.message") && (
                 <div className="pt-3" role="status" aria-live="polite">
