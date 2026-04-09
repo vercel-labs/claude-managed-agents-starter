@@ -1,66 +1,62 @@
-# Claude Managed Agents (Vercel Labs)
+# Claude Managed Agents
 
-Demo app for [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/quickstart): create sessions, send `user.message` events, and **tail** new events with [Vercel Workflow](https://useworkflow.dev) (`sleep` + polled `events.list`). The browser only reads **Neon** via `GET /api/managed-agents/transcript` (no Anthropic on that path).
+An internal knowledge assistant built with [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview). Connect your GitHub, Notion, and Slack via MCP and ask questions across all of them.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel-labs/claude-managed-agents)
-
-**Template / project:** [vercel.com/vercel-labs/claude-managed-agents](https://vercel.com/vercel-labs/claude-managed-agents)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fclaude-managed-agents&project-name=claude-managed-agents&repository-name=claude-managed-agents&env=ANTHROPIC_API_KEY%2CANTHROPIC_AGENT_ID%2CANTHROPIC_ENVIRONMENT_ID%2CBETTER_AUTH_SECRET%2CVERCEL_CLIENT_ID%2CVERCEL_CLIENT_SECRET%2CTOKEN_ENCRYPTION_KEY&envDescription=Configure+your+Anthropic+agent+and+Vercel+OAuth+credentials.&envLink=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fclaude-managed-agents%23environment-variables&products=%5B%7B%22type%22%3A%22integration%22%2C%22protocol%22%3A%22storage%22%2C%22productSlug%22%3A%22neon%22%2C%22integrationSlug%22%3A%22neon%22%7D%5D&demo-title=Internal+Knowledge+Agent&demo-description=An+internal+knowledge+assistant+powered+by+Claude+Managed+Agents.+Connect+GitHub%2C+Notion%2C+and+Slack+via+MCP+to+search+across+your+tools.)
 
 ## Stack
 
 | Layer | Choice |
 | --- | --- |
-| App | Next.js 16 (App Router), React 19 |
+| App | [Next.js 16](https://nextjs.org) (App Router), React 19 |
 | UI | [shadcn/ui](https://ui.shadcn.com), Tailwind CSS v4 |
 | Auth | [Better Auth](https://www.better-auth.com) + [Sign in with Vercel](https://vercel.com/docs/sign-in-with-vercel/getting-started) |
 | Data | [Neon](https://neon.tech) + [Drizzle ORM](https://orm.drizzle.team) |
-| Background | [Workflow DevKit](https://useworkflow.dev) — `app/workflows/tail-session.ts` |
-| Agents API | `@anthropic-ai/sdk` — `beta.sessions` / `events.send` / `events.list` |
-| Package manager | [pnpm](https://pnpm.io) (see `packageManager` in `package.json`) |
+| Background | [Workflow DevKit](https://useworkflow.dev) |
+| Agents | [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) via `@anthropic-ai/sdk` |
 
-## Product behavior
+## Setup
 
-- **Routes:** `/login`, `/chat`, `/chat/[sessionId]`. Sidebar lists your sessions (from `GET /api/managed-agents/sessions`); **New chat** creates a row and navigates to the new id.
-- **Messaging:** `POST /api/managed-agents/message` calls Anthropic `events.send`, bumps `updatedAt`, acquires a **tail lock** (`tailing = true` only if it was `false`), and starts `tailSessionWorkflow` when the lock is acquired.
-- **Tail workflow:** A step lists events (desc, paginated), inserts into Postgres with a **unique** `(sessionId, anthropicEventId)` dedupe, updates `updatedAt` when new rows appear, and stops when it sees a **terminal** idle/terminated/deleted/error event—then clears `tailing`.
-- **Transcript UI:** Polls `GET /api/managed-agents/transcript?sessionId=` (faster interval while `tailing` is true).
+### 1. Clone and install
 
-## Local setup
+```bash
+pnpm install
+```
 
-Use [pnpm](https://pnpm.io). With [Corepack](https://nodejs.org/api/corepack.html): `corepack enable` (Node 16.13+), then the `packageManager` field in `package.json` selects the right pnpm version.
+### 2. Environment variables
 
-1. **Clone & install**
+Copy `.env.example` to `.env.local` and fill in each variable:
 
-   ```bash
-   pnpm install
-   ```
+| Variable | Where to get it |
+| --- | --- |
+| `DATABASE_URL` | Auto-provisioned by the Deploy button, or via `vercel integration add neon`. Or create a database at [neon.tech](https://neon.tech). |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) |
+| `ANTHROPIC_AGENT_ID` | Create an agent via the [Managed Agents quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart). |
+| `ANTHROPIC_ENVIRONMENT_ID` | Create an environment for your agent and copy the ID. |
+| `BETTER_AUTH_SECRET` | Generate with `openssl rand -base64 32`. |
+| `BETTER_AUTH_URL` | `http://localhost:3000` locally, your deployment URL in production. |
+| `VERCEL_CLIENT_ID` | Create an OAuth app via [Sign in with Vercel](https://vercel.com/docs/sign-in-with-vercel/getting-started). Callback: `<your-url>/api/auth/callback/vercel`. |
+| `VERCEL_CLIENT_SECRET` | From the same Vercel OAuth app. |
+| `TOKEN_ENCRYPTION_KEY` | Generate with `openssl rand -hex 32`. |
+| `GITHUB_CLIENT_ID` | *(Optional)* [Create a GitHub OAuth app](https://github.com/settings/applications/new) for the GitHub integration. |
+| `GITHUB_CLIENT_SECRET` | *(Optional)* From the same GitHub OAuth app. |
 
-2. **Environment** — copy `.env.example` to `.env.local` and set variables (see [docs/AUTH.md](./docs/AUTH.md) for Sign in with Vercel). In production, set a strong `BETTER_AUTH_SECRET` (never rely on the dev fallback in `lib/auth.ts`).
+### 3. Push database schema
 
-3. **Database** — push Drizzle schema to Neon:
+```bash
+pnpm db:push
+```
 
-   ```bash
-   pnpm db:push
-   ```
+### 4. Run
 
-4. **Dev server**
+```bash
+pnpm dev
+```
 
-   ```bash
-   pnpm dev
-   ```
-
-5. Open [http://localhost:3000](http://localhost:3000) → sign in → use **New chat** and the composer.
-
-Use the same **callback URL** origin as `BETTER_AUTH_URL` (e.g. `http://localhost:3000`) in your Vercel OAuth app settings.
-
-## Scripts
-
-- `pnpm dev` — Next.js dev (Workflow local data under `.next/workflow-data`)
-- `pnpm build` / `pnpm start` — production
-- `pnpm db:generate` — Drizzle migrations (optional)
-- `pnpm db:push` — apply schema to `DATABASE_URL`
+Open [http://localhost:3000](http://localhost:3000), sign in, and start asking questions.
 
 ## References
 
+- [Managed Agents overview](https://platform.claude.com/docs/en/managed-agents/overview)
 - [Managed Agents quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart)
-- [Workflow Next.js setup](https://useworkflow.dev/docs/getting-started/next)
+- [Workflow DevKit docs](https://useworkflow.dev/docs/getting-started/next)

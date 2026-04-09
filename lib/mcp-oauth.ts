@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { mcpOAuthClient, mcpOAuthToken } from "./schema";
 import { and, eq } from "drizzle-orm";
+import { encrypt, decrypt } from "./crypto";
 
 export interface MCPServerInfo {
   name: string;
@@ -269,6 +270,9 @@ export async function saveUserToken(
     ? new Date(Date.now() + expiresIn * 1000)
     : null;
 
+  const encryptedAccess = encrypt(accessToken);
+  const encryptedRefresh = refreshToken ? encrypt(refreshToken) : null;
+
   const [existing] = await db
     .select()
     .from(mcpOAuthToken)
@@ -284,8 +288,8 @@ export async function saveUserToken(
     await db
       .update(mcpOAuthToken)
       .set({
-        accessToken,
-        refreshToken: refreshToken ?? existing.refreshToken,
+        accessToken: encryptedAccess,
+        refreshToken: encryptedRefresh ?? existing.refreshToken,
         expiresAt,
         updatedAt: new Date(),
       })
@@ -295,8 +299,8 @@ export async function saveUserToken(
       id: crypto.randomUUID(),
       userId,
       serverName,
-      accessToken,
-      refreshToken: refreshToken ?? null,
+      accessToken: encryptedAccess,
+      refreshToken: encryptedRefresh,
       expiresAt,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -318,7 +322,12 @@ export async function getUserToken(
       ),
     )
     .limit(1);
-  return row?.accessToken ?? null;
+  if (!row) return null;
+  try {
+    return decrypt(row.accessToken);
+  } catch {
+    return null;
+  }
 }
 
 export async function deleteUserToken(
