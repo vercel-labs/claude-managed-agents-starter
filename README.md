@@ -59,4 +59,4 @@ Open [http://localhost:3000](http://localhost:3000), sign in, and start asking q
 
 - [Managed Agents overview](https://platform.claude.com/docs/en/managed-agents/overview)
 - [Managed Agents quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart)
-- [Workflow DevKit docs](https://useworkflow.dev/docs/getting-started/next)
+- [Workflow SDK docs](https://useworkflow.dev/docs/getting-started/next)
