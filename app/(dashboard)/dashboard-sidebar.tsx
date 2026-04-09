@@ -146,10 +146,10 @@ export function DashboardSidebar({
         <Link
           href="/"
           onClick={onNavigate}
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
         >
           <Plus className="size-4" />
-          New session
+          New question
         </Link>
       </div>
 
@@ -160,9 +160,9 @@ export function DashboardSidebar({
             <div
               key={session.id}
               className={cn(
-                "group/session relative mb-0.5 rounded-md transition-colors",
+                "group/session relative mb-0.5 rounded-lg transition-colors",
                 active
-                  ? "bg-muted text-foreground"
+                  ? "bg-primary/10 text-foreground"
                   : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
               )}
             >
@@ -171,7 +171,7 @@ export function DashboardSidebar({
                 onClick={onNavigate}
                 className="block px-2 py-1.5 pr-8 text-sm"
               >
-                <div className="truncate text-xs font-medium">
+                <div className="truncate text-sm font-medium">
                   {session.title || "Untitled"}
                 </div>
                 <div

@@ -11,6 +11,23 @@ const REQUIRED_MCP_SERVERS: MCPServerDef[] = [
   { name: "slack", url: "https://mcp.slack.com/mcp" },
 ];
 
+const AGENT_INSTRUCTIONS = `You are an internal knowledge assistant. Your job is to help users find information across their connected tools and answer questions using internal context.
+
+## Available integrations
+
+- **GitHub** - Search repositories, read code, issues, pull requests, and discussions. Use GitHub MCP tools to find engineering context, understand codebases, review recent changes, and look up technical decisions.
+- **Notion** - Search pages, databases, wikis, and meeting notes. Use Notion MCP tools to find documentation, project specs, team knowledge, and organizational information.
+- **Slack** - Search messages, channels, and conversations. Use Slack MCP tools to find discussions, decisions, and context from team communication.
+
+## Guidelines
+
+- When the user asks a question, think about which sources are most likely to contain the answer and search across them proactively.
+- Synthesize information from multiple sources when relevant - combine code context from GitHub with documentation from Notion and discussion context from Slack.
+- Always cite your sources - mention which tool, repo, page, or channel the information came from.
+- If you cannot find the answer in connected tools, say so clearly rather than guessing.
+- Be concise but thorough. Provide direct answers first, then supporting context.
+- If an MCP tool call fails with an auth error, let the user know they may need to reconnect that integration.`;
+
 export function getManagedAgentConfig(): {
   agentId: string;
   environmentId: string;
@@ -44,7 +61,14 @@ export async function ensureAgentMCPs(): Promise<void> {
     return toolset.default_config.permission_policy?.type !== "always_allow";
   });
 
-  if (missingServers.length === 0 && toolsNeedingUpdate.length === 0) return;
+  const needsDescription = agent.description !== AGENT_INSTRUCTIONS;
+
+  if (
+    missingServers.length === 0 &&
+    toolsNeedingUpdate.length === 0 &&
+    !needsDescription
+  )
+    return;
 
   type ToolParam = NonNullable<
     Parameters<typeof client.beta.agents.update>[1]["tools"]
@@ -110,6 +134,7 @@ export async function ensureAgentMCPs(): Promise<void> {
 
   await client.beta.agents.update(agentId, {
     version: agent.version,
+    ...(needsDescription && { description: AGENT_INSTRUCTIONS }),
     ...(mcp_servers && { mcp_servers }),
     ...(tools && { tools }),
   });

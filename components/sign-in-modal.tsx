@@ -44,8 +44,8 @@ export function SignInModal({
           </div>
           <DialogTitle>Sign in to get started</DialogTitle>
           <DialogDescription>
-            Connect your Vercel account to create sessions and send messages
-            through the Claude Managed Agents API.
+            Connect your Vercel account to search across your internal
+            knowledge base.
           </DialogDescription>
         </DialogHeader>
         <div className="mt-2 space-y-3">

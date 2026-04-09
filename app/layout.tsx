@@ -21,9 +21,9 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Claude Managed Agents",
+  title: "Internal Knowledge Agent",
   description:
-    "Vercel + Workflow + Neon + Better Auth demo for Claude Managed Agents",
+    "Ask questions across your internal tools - GitHub, Notion, Slack, and more.",
 };
 
 export default function RootLayout({

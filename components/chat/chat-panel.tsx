@@ -39,6 +39,31 @@ const streamdownComponents: Components = {
       {children}
     </div>
   ),
+  ol: ({ children, ...props }) => (
+    <ol {...props} className="mb-4 list-decimal space-y-2 pl-6 last:mb-0">
+      {children}
+    </ol>
+  ),
+  ul: ({ children, ...props }) => (
+    <ul {...props} className="mb-4 list-disc space-y-1.5 pl-6 last:mb-0">
+      {children}
+    </ul>
+  ),
+  li: ({ children, ...props }) => (
+    <li {...props} className="pl-1">
+      {children}
+    </li>
+  ),
+  pre: ({ children, ...props }) => (
+    <pre {...props} className="mb-4 overflow-x-auto rounded-lg bg-muted/50 p-4 font-mono text-sm last:mb-0">
+      {children}
+    </pre>
+  ),
+  code: ({ children, ...props }) => (
+    <code {...props} className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[13px]">
+      {children}
+    </code>
+  ),
 };
 
 function Markdown({ text }: { text: string }) {
@@ -483,13 +508,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex h-full min-h-0">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-2 border-b border-border/70 py-3 pl-12 pr-4 md:pl-6">
+        <div className="flex items-center justify-between gap-2 border-b border-border/50 py-3 pl-12 pr-4 md:pl-6">
           <div className="min-w-0 flex-1">
             {loading ? (
               <div className="h-5 w-48 animate-pulse rounded bg-muted/40" />
             ) : (
-              <h1 className="truncate text-base font-medium tracking-tight">
-                {title && title !== "New chat" ? title : "New Session"}
+              <h1 className="truncate text-sm font-medium text-muted-foreground">
+                {title && title !== "New chat" ? title : "New question"}
               </h1>
             )}
           </div>
@@ -498,7 +523,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
               href={latestPr.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted/60"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted/60"
             >
               <GitPullRequest className="size-3.5" />
               PR #{latestPr.number}
@@ -528,8 +553,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                     const msg = textFromContent(payload.content);
                     return (
                       <div key={ev.id} className="flex justify-end">
-                        <div className="max-w-[85%]">
-                          <div className="rounded-lg border border-border/60 bg-muted/60 px-3 py-2 text-sm leading-relaxed">
+                        <div className="max-w-[80%]">
+                          <div className="rounded-2xl bg-muted/70 px-4 py-2.5 text-sm leading-relaxed">
                             <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
                           </div>
                         </div>
@@ -541,7 +566,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                     const msg = textFromContent(payload.content);
                     if (!msg) return null;
                     return (
-                      <div key={ev.id} className="max-w-none overflow-x-auto">
+                      <div key={ev.id} className="max-w-none overflow-x-auto text-foreground/85">
                         <Markdown text={msg} />
                       </div>
                     );
@@ -577,7 +602,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
         <div className="shrink-0 px-4 pb-4">
           <div className="mx-auto max-w-3xl">
-            <div className="rounded-xl border border-border bg-background/95 shadow-lg backdrop-blur">
+            <div className="rounded-2xl border border-border/60 bg-transparent shadow-none transition-shadow focus-within:border-border focus-within:shadow-sm">
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -587,10 +612,10 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                     void handleSend();
                   }
                 }}
-                placeholder="Message the agent..."
+                placeholder="Explore a topic..."
                 rows={1}
                 disabled={sending || tailing}
-                className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-5 pt-3.5 pb-1 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
                 style={{ height: "auto", overflow: "hidden" }}
                 onInput={(e) => {
                   const el = e.currentTarget;
@@ -599,18 +624,18 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                   el.style.overflow = el.scrollHeight > 200 ? "auto" : "hidden";
                 }}
               />
-              <div className="flex items-center justify-end px-3 py-2">
+              <div className="flex items-center justify-end px-4 py-2.5">
                 <button
                   type="button"
                   aria-label="Send message"
                   onClick={() => void handleSend()}
                   disabled={sending || !text.trim()}
-                  className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-30"
+                  className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-30"
                 >
                   {sending ? (
-                    <Loader2 className="size-3.5 animate-spin" />
+                    <Loader2 className="size-4 animate-spin" />
                   ) : (
-                    <ArrowUp className="size-3.5" />
+                    <ArrowUp className="size-4" />
                   )}
                 </button>
               </div>
@@ -622,7 +647,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       <aside className="hidden w-72 shrink-0 border-l border-border/70 px-4 py-4 lg:block">
         <div className="space-y-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Details
+            Sources
           </p>
 
           <div className="space-y-3">

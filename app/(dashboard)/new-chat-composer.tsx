@@ -1,9 +1,20 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SignInModal } from "@/components/sign-in-modal";
-import { ArrowUp, ChevronDown, Loader2 } from "lucide-react";
+import {
+  ArrowUp,
+  BookOpen,
+  ChevronDown,
+  Code,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Search,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 import { GitHubIcon, NotionIcon, SlackIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { setPendingMessage } from "@/lib/pending-message";
@@ -13,6 +24,30 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+const HEADING_PROMPTS = [
+  "Ask about a company process",
+  "Find context across your tools",
+  "Look up a recent decision",
+  "Understand a codebase change",
+  "Search your team knowledge",
+];
+
+const SUGGESTION_PILLS = [
+  { label: "Research", prompt: "Research the latest decisions around our migration plan", icon: <Search className="size-3.5" /> },
+  { label: "Summarize", prompt: "Summarize last week's engineering updates across all channels", icon: <FileText className="size-3.5" /> },
+  { label: "Explain code", prompt: "Explain how authentication works in our main API repo", icon: <Code className="size-3.5" /> },
+  { label: "Find docs", prompt: "Find the onboarding documentation for new hires", icon: <BookOpen className="size-3.5" /> },
+  { label: "Draft", prompt: "Draft a project kickoff message for a new feature", icon: <Sparkles className="size-3.5" /> },
+  { label: "Catch up", prompt: "What's been happening in the product channel this week?", icon: <Zap className="size-3.5" /> },
+];
 
 export function NewChatComposer({
   isAuthenticated = true,
@@ -22,10 +57,13 @@ export function NewChatComposer({
   mcpConnections?: Record<string, boolean>;
 }) {
   const router = useRouter();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [prompt, setPrompt] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSignIn, setShowSignIn] = useState(false);
+  const [showSlackSetup, setShowSlackSetup] = useState(false);
+  const [headingIndex, setHeadingIndex] = useState(0);
   const [mcpState, setMcpState] = useState<Record<string, boolean>>({
     github: true,
     notion: true,
@@ -35,52 +73,64 @@ export function NewChatComposer({
     setMcpState((prev) => ({ ...prev, [name]: enabled }));
   }, []);
 
-  const startSession = useCallback(async () => {
-    if (!isAuthenticated) {
-      setShowSignIn(true);
-      return;
-    }
-    if (!prompt.trim()) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/managed-agents/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(
-          (body as { error?: string }).error ?? "Failed to create session",
-        );
+  useEffect(() => {
+    const id = setInterval(
+      () => setHeadingIndex((i) => (i + 1) % HEADING_PROMPTS.length),
+      4000,
+    );
+    return () => clearInterval(id);
+  }, []);
+
+  const startSession = useCallback(
+    async (text?: string) => {
+      const message = text ?? prompt;
+      if (!isAuthenticated) {
+        setShowSignIn(true);
         return;
       }
-      const data = (await res.json()) as { id: string };
-      const trimmed = prompt.trim();
-      const msgRes = await fetch("/api/managed-agents/message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: data.id, text: trimmed }),
-      });
-      if (!msgRes.ok) {
-        const body = await msgRes.json().catch(() => ({}));
+      if (!message.trim()) return;
+      setCreating(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/managed-agents/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setError(
+            (body as { error?: string }).error ?? "Failed to create session",
+          );
+          return;
+        }
+        const data = (await res.json()) as { id: string };
+        const trimmed = message.trim();
+        const msgRes = await fetch("/api/managed-agents/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: data.id, text: trimmed }),
+        });
+        if (!msgRes.ok) {
+          const body = await msgRes.json().catch(() => ({}));
+          setError(
+            (body as { error?: string }).error ?? "Failed to send message",
+          );
+          return;
+        }
+        setPrompt("");
+        setPendingMessage(data.id, trimmed);
+        router.push(`/chat/${data.id}`);
+      } catch (err) {
         setError(
-          (body as { error?: string }).error ?? "Failed to send message",
+          err instanceof Error ? err.message : "Failed to create session",
         );
-        return;
+      } finally {
+        setCreating(false);
       }
-      setPrompt("");
-      setPendingMessage(data.id, trimmed);
-      router.push(`/chat/${data.id}`);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create session",
-      );
-    } finally {
-      setCreating(false);
-    }
-  }, [isAuthenticated, prompt, router]);
+    },
+    [isAuthenticated, prompt, router],
+  );
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -101,35 +151,40 @@ export function NewChatComposer({
   );
 
   return (
-    <div className="flex h-full items-center justify-center px-4 pt-14 pb-4 md:px-8 md:pt-8 md:pb-8">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-3xl space-y-4"
-      >
-        <h1 className="mb-2 text-center text-2xl font-normal tracking-tight md:text-3xl">
-          What do you want to build?
+    <div className="relative flex h-full items-center justify-center px-4 pb-4 md:px-8 md:pb-8">
+      <form onSubmit={onSubmit} className="w-full max-w-2xl space-y-5">
+        <h1
+          key={headingIndex}
+          className="animate-in fade-in slide-in-from-bottom-2 mb-6 text-center text-2xl font-medium tracking-tight duration-500 md:text-3xl"
+        >
+          {HEADING_PROMPTS[headingIndex]}
         </h1>
 
-        <div className="rounded-xl border border-border bg-muted/50 shadow-sm">
+        <div className="rounded-2xl border border-border bg-muted/30 shadow-sm transition-shadow focus-within:shadow-md focus-within:ring-1 focus-within:ring-primary/20">
           <textarea
+            ref={textareaRef}
             autoFocus
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Describe a task..."
-            rows={4}
+            placeholder="Explore a topic..."
+            rows={2}
             disabled={creating}
-            className="max-h-[200px] min-h-[100px] w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+            className="max-h-[160px] min-h-[72px] w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
           />
 
-          <div className="flex items-center justify-between px-3 py-2">
+          <div className="flex items-center justify-between px-4 py-2.5">
             <div className="flex min-w-0 items-center gap-1.5">
               <IntegrationsDropdown
                 mcpState={mcpState}
                 mcpConnections={mcpConnections}
                 onToggle={toggleMcp}
                 onLogin={(serverName) => {
-                  window.location.href = `/api/mcp-auth/${serverName}`;
+                  if (serverName === "slack") {
+                    setShowSlackSetup(true);
+                  } else {
+                    window.location.href = `/api/mcp-auth/${serverName}`;
+                  }
                 }}
                 onLogout={async (serverName) => {
                   await fetch(`/api/mcp-auth/${serverName}`, {
@@ -143,12 +198,12 @@ export function NewChatComposer({
               type="submit"
               aria-label="Send message"
               disabled={!prompt.trim() || creating}
-              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-30"
+              className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-30"
             >
               {creating ? (
-                <Loader2 className="size-3.5 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                <ArrowUp className="size-3.5" />
+                <ArrowUp className="size-4" />
               )}
             </button>
           </div>
@@ -156,12 +211,58 @@ export function NewChatComposer({
 
         {error && <p className="px-1 text-sm text-destructive">{error}</p>}
 
-        <p className="mx-auto max-w-lg text-center text-xs text-muted-foreground">
-          Describe a task. The agent can read and modify GitHub repos,
-          search Notion, message on Slack, and more.
-        </p>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {SUGGESTION_PILLS.map((pill) => (
+            <button
+              key={pill.label}
+              type="button"
+              onClick={() => {
+                setPrompt(pill.prompt);
+                textareaRef.current?.focus();
+              }}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-foreground"
+            >
+              {pill.icon}
+              {pill.label}
+            </button>
+          ))}
+        </div>
       </form>
+
+      <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-muted-foreground/40">
+        <a
+          href="https://vercel.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="transition-colors hover:text-muted-foreground"
+        >
+          Vercel
+        </a>
+        {" + "}
+        <a
+          href="https://platform.claude.com/docs/en/managed-agents/overview"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="transition-colors hover:text-muted-foreground"
+        >
+          Claude Managed Agents
+        </a>
+        {" "}&middot;{" "}
+        <a
+          href="https://github.com/vercel-labs/claude-managed-agents"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline transition-colors hover:text-muted-foreground"
+        >
+          Clone this template
+        </a>
+      </p>
+
       <SignInModal open={showSignIn} onOpenChange={setShowSignIn} />
+      <SlackSetupModal
+        open={showSlackSetup}
+        onOpenChange={setShowSlackSetup}
+      />
     </div>
   );
 }
@@ -237,6 +338,53 @@ function IntegrationsDropdown({
   );
 }
 
+function SlackSetupModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader className="items-center text-center">
+          <div className="mx-auto mb-2 flex size-10 items-center justify-center rounded-full border border-border bg-muted">
+            <SlackIcon className="size-5" />
+          </div>
+          <DialogTitle>Slack requires setup</DialogTitle>
+          <DialogDescription>
+            Slack integration requires a Slack app with OAuth credentials. Clone
+            this template and deploy with your own Slack app ID and secret to
+            search your team conversations.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-2 space-y-2">
+          <a
+            href="https://github.com/vercel-labs/claude-managed-agents"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-foreground text-sm font-medium text-background transition-opacity hover:opacity-90"
+          >
+            <GitHubIcon className="size-3.5" />
+            Clone template
+            <ExternalLink className="size-3" />
+          </a>
+          <a
+            href="https://api.slack.com/apps"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border text-sm font-medium transition-colors hover:bg-muted"
+          >
+            Create a Slack app
+            <ExternalLink className="size-3" />
+          </a>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function IntegrationRow({
   server,
   connected,
@@ -261,7 +409,7 @@ function IntegrationRow({
             className={cn(
               "absolute -right-0.5 -bottom-0.5 size-2 rounded-full border border-background",
               connected && enabled
-                ? "bg-emerald-500"
+                ? "bg-primary"
                 : connected
                   ? "bg-muted-foreground/40"
                   : "bg-muted-foreground/20",
