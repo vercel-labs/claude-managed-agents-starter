@@ -46,6 +46,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
+  const isFirstMessage = row.title === "New chat";
+
   try {
     await sendUserMessage(row.anthropicSessionId, text);
   } catch (e) {
@@ -53,10 +55,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
-  const titleUpdate =
-    row.title === "New chat"
-      ? { title: text.length > 60 ? `${text.slice(0, 57)}…` : text }
-      : {};
+  const titleUpdate = isFirstMessage
+    ? { title: text.length > 60 ? `${text.slice(0, 57)}...` : text }
+    : {};
 
   await db
     .update(managedAgentSession)

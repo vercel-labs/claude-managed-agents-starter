@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Check, ChevronRight, Clock3, GitBranch, GitPullRequest, Loader2 } from "lucide-react";
 import { Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
 import { consumePendingMessage } from "@/lib/pending-message";
+import { GitHubIcon } from "@/components/icons";
+import { formatTimeAgo } from "@/lib/time";
 
 type TranscriptEvent = {
   id: string;
@@ -46,6 +48,41 @@ function Markdown({ text }: { text: string }) {
     </Streamdown>
   );
 }
+
+/* ---------- PR detection ---------- */
+
+const PR_URL_REGEX = /https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/g;
+
+interface DetectedPR {
+  url: string;
+  owner: string;
+  repo: string;
+  number: number;
+}
+
+function extractPRsFromEvents(events: TranscriptEvent[]): DetectedPR[] {
+  const seen = new Set<string>();
+  const prs: DetectedPR[] = [];
+
+  for (const ev of events) {
+    const text = JSON.stringify(ev.payload);
+    let match;
+    PR_URL_REGEX.lastIndex = 0;
+    while ((match = PR_URL_REGEX.exec(text)) !== null) {
+      const url = match[0];
+      if (seen.has(url)) continue;
+      seen.add(url);
+      prs.push({
+        url,
+        owner: match[1],
+        repo: match[2],
+        number: parseInt(match[3], 10),
+      });
+    }
+  }
+  return prs;
+}
+
 
 /* ---------- Tool categorization ---------- */
 
@@ -137,7 +174,7 @@ function ToolCallItem({ ev }: { ev: TranscriptEvent }) {
         )}
         onClick={() => hasDetail && setExpanded((v) => !v)}
       >
-        <Check className="size-3 shrink-0 text-emerald-500" />
+        <Check className="size-3 shrink-0 text-muted-foreground" />
         <span className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px]">
           {rawName}
         </span>
@@ -285,6 +322,12 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   });
   const [tailing, setTailing] = useState(!!pending);
   const [title, setTitle] = useState<string | null>(null);
+  const [sessionMeta, setSessionMeta] = useState<{
+    repoOwner: string | null;
+    repoName: string | null;
+    baseBranch: string | null;
+    updatedAt: string | null;
+  }>({ repoOwner: null, repoName: null, baseBranch: null, updatedAt: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -309,6 +352,10 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         title: string | null;
         events: TranscriptEvent[];
         tailing: boolean;
+        repoOwner: string | null;
+        repoName: string | null;
+        baseBranch: string | null;
+        updatedAt: string | null;
       };
       setEvents((prev) => {
         const optimistic = prev.filter((e) => e.id.startsWith("optimistic-"));
@@ -319,7 +366,10 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             .map((e) => textFromContent(e.payload.content)),
         );
         const stillPending = optimistic.filter(
-          (e) => !serverTexts.has(textFromContent(e.payload.content)),
+          (e) =>
+            !serverTexts.has(
+              textFromContent(e.payload.content),
+            ),
         );
         return stillPending.length > 0
           ? [...data.events, ...stillPending]
@@ -351,6 +401,12 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           : data.tailing || optimisticTailing.current,
       );
       setTitle(data.title);
+      setSessionMeta({
+        repoOwner: data.repoOwner,
+        repoName: data.repoName,
+        baseBranch: data.baseBranch,
+        updatedAt: data.updatedAt,
+      });
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load transcript");
@@ -416,125 +472,219 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   }
 
   const grouped = groupEvents(events);
+  const detectedPRs = useMemo(() => extractPRsFromEvents(events), [events]);
+
+  const repoFullName = sessionMeta.repoOwner && sessionMeta.repoName
+    ? `${sessionMeta.repoOwner}/${sessionMeta.repoName}`
+    : null;
+  const repoUrl = repoFullName ? `https://github.com/${repoFullName}` : null;
+  const latestPr = detectedPRs[detectedPRs.length - 1] ?? null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center border-b border-border/70 px-6">
-        {loading ? (
-          <div className="h-5 w-48 animate-pulse rounded bg-muted/40" />
-        ) : (
-          <h1 className="text-sm font-semibold">
-            {title && title !== "New chat" ? title : "New Session"}
-          </h1>
-        )}
-      </header>
+    <div className="flex h-full min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex items-center justify-between gap-2 border-b border-border/70 py-3 pl-12 pr-4 md:pl-6">
+          <div className="min-w-0 flex-1">
+            {loading ? (
+              <div className="h-5 w-48 animate-pulse rounded bg-muted/40" />
+            ) : (
+              <h1 className="truncate text-base font-medium tracking-tight">
+                {title && title !== "New chat" ? title : "New Session"}
+              </h1>
+            )}
+          </div>
+          {latestPr && (
+            <a
+              href={latestPr.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted/60"
+            >
+              <GitPullRequest className="size-3.5" />
+              PR #{latestPr.number}
+            </a>
+          )}
+        </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        {loading ? (
-          <ChatSkeleton />
-        ) : (
-          <div className="mx-auto max-w-3xl px-6 py-6">
-            <div className="flex flex-col gap-4">
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              {grouped.map((group, idx) => {
-                if (group.kind === "tools") {
-                  return <ToolGroup key={idx} tools={group.events} />;
-                }
-                const ev = group.event;
-                const { type, payload } = ev;
-
-                if (type === "user.message") {
-                  const msg = textFromContent(payload.content);
-                  return (
-                    <div key={ev.id} className="flex justify-end">
-                      <div className="max-w-[85%]">
-                        <div className="rounded-lg border border-border/60 bg-muted/60 px-3 py-2 text-sm leading-relaxed">
-                          <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (type === "agent.message") {
-                  const msg = textFromContent(payload.content);
-                  if (!msg) return null;
-                  return (
-                    <div key={ev.id} className="max-w-none overflow-x-auto">
-                      <Markdown text={msg} />
-                    </div>
-                  );
-                }
-
-                if (type === "session.status_idle") {
-                  return (
-                    <div key={ev.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
-                      <p className="text-xs font-medium text-amber-500">Requires action</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        This session needs confirmation in the Anthropic console.
-                      </p>
-                    </div>
-                  );
-                }
-
-                return null;
-              })}
-              {(tailing || sending) &&
-                events.some((e) => e.type === "user.message") && (
-                <div className="pt-3" role="status" aria-live="polite">
-                  <div className="py-1 text-sm font-medium shimmer-text">
-                    Thinking...
-                  </div>
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          {loading ? (
+            <ChatSkeleton />
+          ) : (
+            <div className="mx-auto max-w-3xl space-y-2 pb-40">
+              {error && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-900/20">
+                  <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
                 </div>
               )}
-              <div ref={bottomRef} />
-            </div>
-          </div>
-        )}
-      </div>
+              <div className="flex flex-col gap-4">
+                {grouped.map((group, idx) => {
+                  if (group.kind === "tools") {
+                    return <ToolGroup key={idx} tools={group.events} />;
+                  }
+                  const ev = group.event;
+                  const { type, payload } = ev;
 
-      <div className="shrink-0 px-4 pb-4">
-        <div className="mx-auto max-w-3xl">
-          <div className="rounded-xl border border-border bg-background/95 shadow-lg backdrop-blur">
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-              }}
-              placeholder="Message the agent..."
-              rows={1}
-              disabled={sending || tailing}
-              className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
-              style={{ height: "auto", overflow: "hidden" }}
-              onInput={(e) => {
-                const el = e.currentTarget;
-                el.style.height = "auto";
-                el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-                el.style.overflow = el.scrollHeight > 200 ? "auto" : "hidden";
-              }}
-            />
-            <div className="flex items-center justify-end px-3 py-2">
-              <button
-                type="button"
-                aria-label="Send message"
-                onClick={() => void handleSend()}
-                disabled={sending || !text.trim()}
-                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-30"
-              >
-                {sending ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <ArrowUp className="size-3.5" />
+                  if (type === "user.message") {
+                    const msg = textFromContent(payload.content);
+                    return (
+                      <div key={ev.id} className="flex justify-end">
+                        <div className="max-w-[85%]">
+                          <div className="rounded-lg border border-border/60 bg-muted/60 px-3 py-2 text-sm leading-relaxed">
+                            <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (type === "agent.message") {
+                    const msg = textFromContent(payload.content);
+                    if (!msg) return null;
+                    return (
+                      <div key={ev.id} className="max-w-none overflow-x-auto">
+                        <Markdown text={msg} />
+                      </div>
+                    );
+                  }
+
+                  if (type === "session.status_idle") {
+                    return (
+                      <div key={ev.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                        <p className="text-xs font-medium text-amber-500">Requires action</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          This session needs confirmation in the Anthropic console.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })}
+                
+                {(tailing || sending) &&
+                  events.some((e) => e.type === "user.message") && (
+                  <div className="pt-3" role="status" aria-live="polite">
+                    <div className="py-1 text-sm font-medium shimmer-text">
+                      Thinking...
+                    </div>
+                  </div>
                 )}
-              </button>
+                <div ref={bottomRef} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 px-4 pb-4">
+          <div className="mx-auto max-w-3xl">
+            <div className="rounded-xl border border-border bg-background/95 shadow-lg backdrop-blur">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
+                }}
+                placeholder="Message the agent..."
+                rows={1}
+                disabled={sending || tailing}
+                className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+                style={{ height: "auto", overflow: "hidden" }}
+                onInput={(e) => {
+                  const el = e.currentTarget;
+                  el.style.height = "auto";
+                  el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+                  el.style.overflow = el.scrollHeight > 200 ? "auto" : "hidden";
+                }}
+              />
+              <div className="flex items-center justify-end px-3 py-2">
+                <button
+                  type="button"
+                  aria-label="Send message"
+                  onClick={() => void handleSend()}
+                  disabled={sending || !text.trim()}
+                  className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-30"
+                >
+                  {sending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <ArrowUp className="size-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      <aside className="hidden w-72 shrink-0 border-l border-border/70 px-4 py-4 lg:block">
+        <div className="space-y-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Details
+          </p>
+
+          <div className="space-y-3">
+            {repoFullName && (
+              <SidebarRow
+                icon={<GitHubIcon className="size-4" />}
+                value={repoFullName}
+                href={repoUrl ?? undefined}
+              />
+            )}
+            {sessionMeta.baseBranch && (
+              <SidebarRow
+                icon={<GitBranch className="size-4" />}
+                value={sessionMeta.baseBranch}
+              />
+            )}
+            {sessionMeta.updatedAt && (
+              <SidebarRow
+                icon={<Clock3 className="size-4" />}
+                value={formatTimeAgo(sessionMeta.updatedAt) || "just now"}
+              />
+            )}
+            {latestPr && (
+              <SidebarRow
+                icon={<GitPullRequest className="size-4" />}
+                value={`PR #${latestPr.number}`}
+                href={latestPr.url}
+              />
+            )}
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function SidebarRow({
+  icon,
+  value,
+  href,
+}: {
+  icon: React.ReactNode;
+  value: string;
+  href?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="truncate text-sm text-muted-foreground hover:underline"
+        >
+          {value}
+        </a>
+      ) : (
+        <p className="truncate text-sm text-muted-foreground" suppressHydrationWarning>
+          {value}
+        </p>
+      )}
     </div>
   );
 }

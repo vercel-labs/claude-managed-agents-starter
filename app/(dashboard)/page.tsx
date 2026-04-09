@@ -1,12 +1,19 @@
 import { getSession } from "@/lib/session";
+import { getUserMCPConnections } from "@/lib/mcp-oauth";
 import { NewChatComposer } from "./new-chat-composer";
 
-async function getIsAuthenticated() {
-  const session = await getSession();
-  return !!session?.user;
-}
-
 export default async function HomePage() {
-  const isAuthenticated = await getIsAuthenticated();
-  return <NewChatComposer isAuthenticated={isAuthenticated} />;
+  const session = await getSession();
+  const viewer = session?.user ?? null;
+
+  const mcpConnections = viewer
+    ? await getUserMCPConnections(viewer.id)
+    : {};
+
+  return (
+    <NewChatComposer
+      isAuthenticated={!!viewer}
+      mcpConnections={mcpConnections}
+    />
+  );
 }

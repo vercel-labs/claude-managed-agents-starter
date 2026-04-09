@@ -15,7 +15,8 @@ function isPublicPath(pathname: string) {
 function needsAuth(pathname: string) {
   return (
     pathname.startsWith("/chat") ||
-    pathname.startsWith("/api/managed-agents")
+    pathname.startsWith("/api/managed-agents") ||
+    pathname.startsWith("/api/github")
   );
 }
 

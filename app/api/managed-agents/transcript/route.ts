@@ -25,6 +25,10 @@ export async function GET(request: Request) {
       id: managedAgentSession.id,
       title: managedAgentSession.title,
       tailing: managedAgentSession.tailing,
+      repoOwner: managedAgentSession.repoOwner,
+      repoName: managedAgentSession.repoName,
+      baseBranch: managedAgentSession.baseBranch,
+      updatedAt: managedAgentSession.updatedAt,
     })
     .from(managedAgentSession)
     .where(
@@ -56,6 +60,10 @@ export async function GET(request: Request) {
   return NextResponse.json({
     title: sessionRow.title,
     tailing: sessionRow.tailing,
+    repoOwner: sessionRow.repoOwner,
+    repoName: sessionRow.repoName,
+    baseBranch: sessionRow.baseBranch,
+    updatedAt: sessionRow.updatedAt.toISOString(),
     events: events.map((e) => ({
       id: e.id,
       anthropicEventId: e.anthropicEventId,
