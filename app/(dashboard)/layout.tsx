@@ -20,7 +20,6 @@ async function getViewerAndSessions() {
         id: managedAgentSession.id,
         title: managedAgentSession.title,
         updatedAt: managedAgentSession.updatedAt,
-        tailing: managedAgentSession.tailing,
       })
       .from(managedAgentSession)
       .where(eq(managedAgentSession.userId, session.user.id))
@@ -31,7 +30,6 @@ async function getViewerAndSessions() {
       id: r.id,
       title: r.title,
       updatedAt: r.updatedAt.toISOString(),
-      tailing: r.tailing,
     }));
 
     return { viewer, sessions };

@@ -16,7 +16,6 @@ export async function GET() {
       id: managedAgentSession.id,
       title: managedAgentSession.title,
       updatedAt: managedAgentSession.updatedAt,
-      tailing: managedAgentSession.tailing,
     })
     .from(managedAgentSession)
     .where(eq(managedAgentSession.userId, authz.userId))
@@ -27,7 +26,6 @@ export async function GET() {
       id: r.id,
       title: r.title,
       updatedAt: r.updatedAt.toISOString(),
-      tailing: r.tailing,
     })),
   });
 }

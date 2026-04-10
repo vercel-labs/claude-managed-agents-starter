@@ -1,10 +1,8 @@
 import {
   boolean,
-  jsonb,
   pgTable,
   text,
   timestamp,
-  unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -69,7 +67,7 @@ export const managedAgentSession = pgTable("managed_agent_session", {
     .defaultNow(),
   agentId: text("agent_id").notNull(),
   environmentId: text("environment_id").notNull(),
-  tailing: boolean("tailing").notNull().default(false),
+  workflowRunId: text("workflow_run_id"),
   repoUrl: text("repo_url"),
   repoOwner: text("repo_owner"),
   repoName: text("repo_name"),
@@ -113,20 +111,3 @@ export const mcpOAuthToken = pgTable(
   }),
 );
 
-export const managedAgentEvent = pgTable(
-  "managed_agent_event",
-  {
-    id: text("id").primaryKey(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => managedAgentSession.id, { onDelete: "cascade" }),
-    anthropicEventId: text("anthropic_event_id").notNull(),
-    type: text("type").notNull(),
-    payload: jsonb("payload").notNull(),
-    processedAt: timestamp("processed_at", { withTimezone: true }),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
-  },
-  (t) => ({
-    sessionAnthropicUnique: unique().on(t.sessionId, t.anthropicEventId),
-  }),
-);

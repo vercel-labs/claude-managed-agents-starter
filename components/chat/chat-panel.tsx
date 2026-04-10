@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronRight, Loader2, PanelLeft } from "lucide-react";
 import { Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
@@ -262,7 +262,7 @@ function TranscriptRenderer({ grouped }: { grouped: EventGroup[] }) {
           return (
             <div key={ev.id} className="flex justify-end">
               <div className="max-w-[80%]">
-                <div className="rounded-2xl bg-muted/70 px-4 py-2.5 text-sm leading-relaxed">
+                <div className="rounded-2xl bg-muted/70 px-4 py-2.5 text-[15px] leading-relaxed">
                   <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
                 </div>
               </div>
@@ -274,7 +274,7 @@ function TranscriptRenderer({ grouped }: { grouped: EventGroup[] }) {
           const msg = textFromContent(payload.content);
           if (!msg) return null;
           return (
-            <div key={ev.id} className="max-w-none overflow-x-auto text-foreground/85">
+            <div key={ev.id} className="max-w-none overflow-x-auto text-[15px] leading-relaxed text-foreground/85">
               <Markdown text={msg} />
             </div>
           );
@@ -420,80 +420,95 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const optimisticTailing = useRef(!!pending);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const lastEventCountRef = useRef(0);
-  const staleTailingCountRef = useRef(0);
-  const STALE_TAILING_LIMIT = 24;
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const seenIdsRef = useRef(new Set<string>());
 
-  const poll = useCallback(async () => {
-    try {
-      const res = await fetch(
-        `/api/managed-agents/transcript?sessionId=${encodeURIComponent(sessionId)}`,
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string }).error ?? "Failed to load");
+  function connectToStream(runId: string) {
+    eventSourceRef.current?.close();
+
+    const es = new EventSource(`/api/readable/${runId}`);
+    eventSourceRef.current = es;
+    setTailing(true);
+
+    es.onmessage = (msg) => {
+      try {
+        const ev = JSON.parse(msg.data) as TranscriptEvent;
+        if (seenIdsRef.current.has(ev.id)) return;
+        seenIdsRef.current.add(ev.id);
+
+        setEvents((prev) => {
+          if (prev.some((e) => e.id === ev.id)) return prev;
+
+          const withoutOptimistic =
+            ev.type === "user.message"
+              ? prev.filter((e) => {
+                  if (!e.id.startsWith("optimistic-")) return true;
+                  return (
+                    textFromContent(e.payload.content) !==
+                    textFromContent(ev.payload.content)
+                  );
+                })
+              : prev;
+          return [...withoutOptimistic, ev];
+        });
+      } catch {
+        // ignore malformed events
       }
-      const data = (await res.json()) as {
-        title: string | null;
-        events: TranscriptEvent[];
-        tailing: boolean;
-      };
-      setEvents((prev) => {
-        const optimistic = prev.filter((e) => e.id.startsWith("optimistic-"));
-        if (optimistic.length === 0) return data.events;
-        const serverTexts = new Set(
-          data.events
-            .filter((e) => e.type === "user.message")
-            .map((e) => textFromContent(e.payload.content)),
+    };
+
+    es.onerror = () => {
+      es.close();
+      eventSourceRef.current = null;
+    };
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      try {
+        const res = await fetch(
+          `/api/managed-agents/transcript?sessionId=${encodeURIComponent(sessionId)}`,
         );
-        const stillPending = optimistic.filter(
-          (e) =>
-            !serverTexts.has(
-              textFromContent(e.payload.content),
-            ),
-        );
-        if (stillPending.length === 0) {
-          optimisticTailing.current = false;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            (body as { error?: string }).error ?? "Failed to load",
+          );
         }
-        return stillPending.length > 0
-          ? [...data.events, ...stillPending]
-          : data.events;
-      });
-      if (data.events.length !== lastEventCountRef.current) {
-        lastEventCountRef.current = data.events.length;
-        staleTailingCountRef.current = 0;
-      } else {
-        staleTailingCountRef.current++;
+        const data = (await res.json()) as {
+          title: string | null;
+          workflowRunId: string | null;
+        };
+        if (cancelled) return;
+
+        setTitle(data.title);
+
+        if (data.workflowRunId) {
+          connectToStream(data.workflowRunId);
+        } else {
+          setTailing(false);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(
+            e instanceof Error ? e.message : "Failed to load transcript",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      const staleTimeout = staleTailingCountRef.current >= STALE_TAILING_LIMIT;
-
-      setTailing(
-        staleTimeout
-          ? false
-          : data.tailing || optimisticTailing.current,
-      );
-      setTitle(data.title);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load transcript");
-    } finally {
-      setLoading(false);
     }
+
+    void init();
+
+    return () => {
+      cancelled = true;
+      eventSourceRef.current?.close();
+    };
   }, [sessionId]);
-
-  useEffect(() => {
-    void poll();
-  }, [poll]);
-
-  useEffect(() => {
-    const intervalMs = tailing ? 2_500 : 5_000;
-    const id = setInterval(() => void poll(), intervalMs);
-    return () => clearInterval(id);
-  }, [poll, tailing]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -503,8 +518,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
-    optimisticTailing.current = true;
-    staleTailingCountRef.current = 0;
     setTailing(true);
     setError(null);
 
@@ -530,10 +543,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Send failed");
       }
-      optimisticTailing.current = false;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Send failed");
-      optimisticTailing.current = false;
       setTailing(false);
       setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
     } finally {
@@ -553,7 +564,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     return false;
   });
 
-  const showThinking = !agentDoneAfterLastMsg && (tailing || sending) && lastUserIdx >= 0;
+  const isActive = (tailing || sending) && !agentDoneAfterLastMsg;
+  const showThinking = isActive && lastUserIdx >= 0;
 
   return (
     <div className="flex h-full min-h-0">
@@ -604,7 +616,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           )}
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-4">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background from-55% to-transparent px-4 pb-4 pt-10">
           <div className="pointer-events-auto mx-auto max-w-3xl">
             <div className="rounded-2xl border border-border/60 bg-background/95 shadow-lg backdrop-blur transition-shadow focus-within:border-border focus-within:shadow-xl">
               <textarea
@@ -618,7 +630,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 }}
                 placeholder="Explore a topic..."
                 rows={1}
-                disabled={sending || showThinking}
+                disabled={sending || isActive}
                 className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-5 pt-3.5 pb-1 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
                 style={{ height: "auto", overflow: "hidden" }}
                 onInput={(e) => {

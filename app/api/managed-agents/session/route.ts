@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
+import { start } from "workflow/api";
 import { db } from "@/lib/db";
-import { managedAgentSession, managedAgentEvent } from "@/lib/schema";
+import { managedAgentSession } from "@/lib/schema";
 import { createCodingSession } from "@/lib/managed-agents";
 import { requireUserId } from "@/lib/session";
 import { getOrCreateVaultForUser, syncMCPCredential } from "@/lib/vault";
 import { getUserToken, MCP_SERVERS } from "@/lib/mcp-oauth";
+import { sessionWorkflow } from "@/app/workflows/tail-session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,6 +39,13 @@ export async function POST(_request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 502 });
   }
 
+  const run = await start(sessionWorkflow, [
+    {
+      internalSessionId: id,
+      anthropicSessionId: anthropic.anthropicSessionId,
+    },
+  ]);
+
   await db.insert(managedAgentSession).values({
     id,
     userId: authz.userId,
@@ -44,14 +53,14 @@ export async function POST(_request: NextRequest) {
     title: "New chat",
     agentId: anthropic.agentId,
     environmentId: anthropic.environmentId,
-    tailing: false,
+    workflowRunId: run.runId,
     repoUrl: null,
     repoOwner: null,
     repoName: null,
     baseBranch: null,
   });
 
-  return NextResponse.json({ id });
+  return NextResponse.json({ id, runId: run.runId });
 }
 
 export async function DELETE(request: NextRequest) {
@@ -78,9 +87,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  await db
-    .delete(managedAgentEvent)
-    .where(eq(managedAgentEvent.sessionId, sessionId));
   await db
     .delete(managedAgentSession)
     .where(eq(managedAgentSession.id, sessionId));
