@@ -24,7 +24,6 @@ export async function GET(request: Request) {
     .select({
       id: managedAgentSession.id,
       title: managedAgentSession.title,
-      tailing: managedAgentSession.tailing,
       workflowRunId: managedAgentSession.workflowRunId,
     })
     .from(managedAgentSession)
@@ -43,7 +42,6 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     title: sessionRow.title,
-    tailing: sessionRow.tailing,
     workflowRunId: sessionRow.workflowRunId,
   });
 }

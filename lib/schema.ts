@@ -1,10 +1,8 @@
 import {
   boolean,
-  jsonb,
   pgTable,
   text,
   timestamp,
-  unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -114,20 +112,3 @@ export const mcpOAuthToken = pgTable(
   }),
 );
 
-export const managedAgentEvent = pgTable(
-  "managed_agent_event",
-  {
-    id: text("id").primaryKey(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => managedAgentSession.id, { onDelete: "cascade" }),
-    anthropicEventId: text("anthropic_event_id").notNull(),
-    type: text("type").notNull(),
-    payload: jsonb("payload").notNull(),
-    processedAt: timestamp("processed_at", { withTimezone: true }),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
-  },
-  (t) => ({
-    sessionAnthropicUnique: unique().on(t.sessionId, t.anthropicEventId),
-  }),
-);

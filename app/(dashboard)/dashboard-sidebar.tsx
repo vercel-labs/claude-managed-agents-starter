@@ -27,7 +27,6 @@ interface SessionListItem {
   id: string;
   title: string | null;
   updatedAt: string;
-  tailing: boolean;
 }
 
 interface ViewerData {

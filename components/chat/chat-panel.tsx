@@ -461,7 +461,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     es.onerror = () => {
       es.close();
       eventSourceRef.current = null;
-      setTailing(false);
     };
   }
 
@@ -481,7 +480,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         }
         const data = (await res.json()) as {
           title: string | null;
-          tailing: boolean;
           workflowRunId: string | null;
         };
         if (cancelled) return;
@@ -545,10 +543,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Send failed");
       }
-      const data = (await res.json()) as { ok: boolean; runId?: string };
-      if (data.runId) {
-        connectToStream(data.runId);
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Send failed");
       setTailing(false);
@@ -570,7 +564,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     return false;
   });
 
-  const showThinking = !agentDoneAfterLastMsg && (tailing || sending) && lastUserIdx >= 0;
+  const isActive = (tailing || sending) && !agentDoneAfterLastMsg;
+  const showThinking = isActive && lastUserIdx >= 0;
 
   return (
     <div className="flex h-full min-h-0">
@@ -635,7 +630,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 }}
                 placeholder="Explore a topic..."
                 rows={1}
-                disabled={sending || showThinking}
+                disabled={sending || isActive}
                 className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-5 pt-3.5 pb-1 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
                 style={{ height: "auto", overflow: "hidden" }}
                 onInput={(e) => {

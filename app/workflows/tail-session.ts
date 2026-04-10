@@ -1,11 +1,8 @@
-import { sleep, getWritable } from "workflow";
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { managedAgentSession } from "@/lib/schema";
+import { defineHook, sleep, getWritable } from "workflow";
 import { getAnthropic } from "@/lib/anthropic";
 import { anthropicEventId } from "@/lib/managed-agent-events";
 
-const MAX_POLLS = 500;
+const MAX_POLLS_PER_TURN = 200;
 const POLL_INTERVAL = "3s";
 
 export type SessionEvent = {
@@ -15,17 +12,28 @@ export type SessionEvent = {
   occurredAt: string;
 };
 
-interface PollResult {
-  lastEventId: string | null;
-  done: boolean;
+export const messageHook = defineHook<{ text: string }>();
+
+async function sendMessage(
+  anthropicSessionId: string,
+  text: string,
+): Promise<void> {
+  "use step";
+  console.log(`[sendMessage] session=${anthropicSessionId} text=${text.slice(0, 60)}`);
+
+  const client = getAnthropic();
+  await client.beta.sessions.events.send(anthropicSessionId, {
+    events: [{ type: "user.message", content: [{ type: "text", text }] }],
+  });
+
+  console.log(`[sendMessage] DONE`);
 }
 
 async function pollAndStream(input: {
   anthropicSessionId: string;
   lastEventId: string | null;
-}): Promise<PollResult> {
+}): Promise<{ lastEventId: string | null; done: boolean }> {
   "use step";
-
   console.log(`[pollAndStream] START session=${input.anthropicSessionId} lastEventId=${input.lastEventId}`);
 
   const client = getAnthropic();
@@ -43,7 +51,6 @@ async function pollAndStream(input: {
 
     console.log(`[pollAndStream] fetched ${page.data.length} events`);
 
-    const newEvents: Array<{ aid: string; event: typeof page.data[number] }> = [];
     let seenLast = input.lastEventId === null;
     for (const event of page.data) {
       const aid = anthropicEventId(event);
@@ -54,10 +61,6 @@ async function pollAndStream(input: {
         continue;
       }
 
-      newEvents.push({ aid, event });
-    }
-
-    for (const { aid, event } of newEvents) {
       const occurredAt =
         "processed_at" in event &&
         typeof (event as { processed_at?: string | null }).processed_at ===
@@ -74,17 +77,14 @@ async function pollAndStream(input: {
 
       written++;
       lastId = aid;
-    }
 
-    const lastEvent = newEvents[newEvents.length - 1];
-    if (lastEvent) {
-      const t = lastEvent.event.type;
       if (
-        t === "session.status_idle" ||
-        t === "session.status_terminated" ||
-        t === "session.deleted"
+        event.type === "session.status_idle" ||
+        event.type === "session.status_terminated" ||
+        event.type === "session.deleted"
       ) {
         done = true;
+        break;
       }
     }
   } finally {
@@ -95,42 +95,38 @@ async function pollAndStream(input: {
   return { lastEventId: lastId, done };
 }
 
-async function markTailingDone(internalSessionId: string) {
-  "use step";
-  console.log(`[markTailingDone] START session=${internalSessionId}`);
-
-  await db
-    .update(managedAgentSession)
-    .set({ tailing: false })
-    .where(eq(managedAgentSession.id, internalSessionId));
-
-  console.log(`[markTailingDone] DONE`);
-}
-
-export async function tailSessionWorkflow(input: {
+export async function sessionWorkflow(input: {
   internalSessionId: string;
   anthropicSessionId: string;
 }) {
   "use workflow";
-
-  console.log(`[tailSessionWorkflow] START internal=${input.internalSessionId} anthropic=${input.anthropicSessionId}`);
+  console.log(`[sessionWorkflow] START internal=${input.internalSessionId} anthropic=${input.anthropicSessionId}`);
 
   let lastEventId: string | null = null;
 
-  for (let i = 0; i < MAX_POLLS; i++) {
-    if (i > 0) await sleep(POLL_INTERVAL);
+  const hook = messageHook.create({
+    token: `msg:${input.internalSessionId}`,
+  });
 
-    const result = await pollAndStream({
-      anthropicSessionId: input.anthropicSessionId,
-      lastEventId,
-    });
+  for await (const { text } of hook) {
+    console.log(`[sessionWorkflow] received message: ${text.slice(0, 60)}`);
 
-    lastEventId = result.lastEventId;
-    console.log(`[tailSessionWorkflow] poll ${i} done=${result.done} lastEventId=${lastEventId}`);
+    await sendMessage(input.anthropicSessionId, text);
 
-    if (result.done) break;
+    for (let i = 0; i < MAX_POLLS_PER_TURN; i++) {
+      await sleep(POLL_INTERVAL);
+
+      const result = await pollAndStream({
+        anthropicSessionId: input.anthropicSessionId,
+        lastEventId,
+      });
+
+      lastEventId = result.lastEventId;
+
+      if (result.done) {
+        console.log(`[sessionWorkflow] turn complete after ${i + 1} polls`);
+        break;
+      }
+    }
   }
-
-  await markTailingDone(input.internalSessionId);
-  console.log(`[tailSessionWorkflow] DONE`);
 }

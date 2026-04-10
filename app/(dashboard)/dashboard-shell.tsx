@@ -18,7 +18,6 @@ interface SessionListItem {
   id: string;
   title: string | null;
   updatedAt: string;
-  tailing: boolean;
 }
 
 export function DashboardShell({

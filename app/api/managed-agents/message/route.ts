@@ -1,12 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { start } from "workflow/api";
 import { db } from "@/lib/db";
 import { managedAgentSession } from "@/lib/schema";
-import { sendUserMessage } from "@/lib/managed-agents";
 import { requireUserId } from "@/lib/session";
 import { checkMessageRateLimit } from "@/lib/rate-limit";
-import { tailSessionWorkflow } from "@/app/workflows/tail-session";
+import { messageHook } from "@/app/workflows/tail-session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -56,14 +54,6 @@ export async function POST(request: Request) {
   }
 
   const isFirstMessage = row.title === "New chat";
-
-  try {
-    await sendUserMessage(row.anthropicSessionId, text);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Failed to send message";
-    return NextResponse.json({ error: message }, { status: 502 });
-  }
-
   const titleUpdate = isFirstMessage
     ? { title: text.length > 60 ? `${text.slice(0, 57)}...` : text }
     : {};
@@ -71,7 +61,6 @@ export async function POST(request: Request) {
   await db
     .update(managedAgentSession)
     .set({
-      tailing: true,
       updatedAt: new Date(),
       ...titleUpdate,
     })
@@ -82,17 +71,7 @@ export async function POST(request: Request) {
       ),
     );
 
-  const run = await start(tailSessionWorkflow, [
-    {
-      internalSessionId: sessionId,
-      anthropicSessionId: row.anthropicSessionId,
-    },
-  ]);
+  await messageHook.resume(`msg:${sessionId}`, { text });
 
-  await db
-    .update(managedAgentSession)
-    .set({ workflowRunId: run.runId })
-    .where(eq(managedAgentSession.id, sessionId));
-
-  return NextResponse.json({ ok: true, runId: run.runId });
+  return NextResponse.json({ ok: true });
 }
