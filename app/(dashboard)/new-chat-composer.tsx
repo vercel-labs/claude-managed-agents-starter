@@ -64,11 +64,11 @@ export function NewChatComposer({
   const [showSignIn, setShowSignIn] = useState(false);
   const [showSlackSetup, setShowSlackSetup] = useState(false);
   const [headingIndex, setHeadingIndex] = useState(0);
-  const [mcpState, setMcpState] = useState<Record<string, boolean>>({
-    github: true,
-    notion: true,
-    slack: true,
-  });
+  const [mcpState, setMcpState] = useState<Record<string, boolean>>(() => ({
+    github: !!mcpConnections.github,
+    notion: !!mcpConnections.notion,
+    slack: !!mcpConnections.slack,
+  }));
   const toggleMcp = useCallback((name: string, enabled: boolean) => {
     setMcpState((prev) => ({ ...prev, [name]: enabled }));
   }, []);
@@ -400,6 +400,13 @@ function IntegrationRow({
   onLogin: (serverName: string) => void;
   onLogout: (serverName: string) => void;
 }) {
+  function handleToggle(checked: boolean) {
+    onToggle(server.name, checked);
+    if (checked && !connected) {
+      onLogin(server.name);
+    }
+  }
+
   return (
     <div className="group/row flex items-center justify-between px-3 py-2.5">
       <div className="flex items-center gap-2.5">
@@ -419,22 +426,7 @@ function IntegrationRow({
         <span className="text-sm">{server.label}</span>
       </div>
       <div className="flex items-center gap-1.5">
-        {connected ? (
-          <>
-            <button
-              type="button"
-              onClick={() => onLogout(server.name)}
-              className="cursor-pointer rounded px-2 py-0.5 text-xs text-muted-foreground/0 ring-0 ring-border transition-all group-hover/row:text-muted-foreground group-hover/row:ring-1 hover:bg-muted! hover:text-foreground!"
-            >
-              Logout
-            </button>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(v: boolean) => onToggle(server.name, v)}
-              size="sm"
-            />
-          </>
-        ) : (
+        {enabled && !connected && (
           <button
             type="button"
             onClick={() => onLogin(server.name)}
@@ -443,6 +435,20 @@ function IntegrationRow({
             Login
           </button>
         )}
+        {connected && (
+          <button
+            type="button"
+            onClick={() => onLogout(server.name)}
+            className="cursor-pointer rounded px-2 py-0.5 text-xs text-muted-foreground/0 ring-0 ring-border transition-all group-hover/row:text-muted-foreground group-hover/row:ring-1 hover:bg-muted! hover:text-foreground!"
+          >
+            Logout
+          </button>
+        )}
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleToggle}
+          size="sm"
+        />
       </div>
     </div>
   );
