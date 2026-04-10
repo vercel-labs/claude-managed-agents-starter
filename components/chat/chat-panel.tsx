@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, Clock3, Loader2, PanelLeft } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, Loader2, PanelLeft } from "lucide-react";
 import { Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
 import { consumePendingMessage } from "@/lib/pending-message";
-import { formatTimeAgo } from "@/lib/time";
 import { useSidebar } from "@/lib/sidebar-context";
 import { Button } from "@/components/ui/button";
 
@@ -417,7 +416,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   });
   const [tailing, setTailing] = useState(!!pending);
   const [title, setTitle] = useState<string | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -442,10 +440,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         title: string | null;
         events: TranscriptEvent[];
         tailing: boolean;
-        repoOwner: string | null;
-        repoName: string | null;
-        baseBranch: string | null;
-        updatedAt: string | null;
       };
       setEvents((prev) => {
         const optimistic = prev.filter((e) => e.id.startsWith("optimistic-"));
@@ -483,7 +477,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           : data.tailing || optimisticTailing.current,
       );
       setTitle(data.title);
-      setUpdatedAt(data.updatedAt);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load transcript");
@@ -644,24 +637,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         </div>
       </div>
 
-      <aside className="hidden w-64 shrink-0 border-l border-border/50 px-4 py-4 lg:block">
-        <div className="space-y-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Details
-          </p>
-
-          <div className="space-y-3">
-            {updatedAt && (
-              <div className="flex items-center gap-2.5">
-                <Clock3 className="size-4 shrink-0 text-muted-foreground" />
-                <p className="truncate text-sm text-muted-foreground" suppressHydrationWarning>
-                  {formatTimeAgo(updatedAt) || "just now"}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }
