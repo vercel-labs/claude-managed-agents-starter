@@ -4,8 +4,8 @@ export function getManagedAgentConfig(): {
   agentId: string;
   environmentId: string;
 } {
-  const agentId = process.env.ANTHROPIC_AGENT_ID?.trim();
-  const environmentId = process.env.ANTHROPIC_ENVIRONMENT_ID?.trim();
+  const agentId = process.env.ANTHROPIC_AGENT_ID;
+  const environmentId = process.env.ANTHROPIC_ENVIRONMENT_ID;
   if (!agentId || !environmentId) {
     throw new Error(
       "ANTHROPIC_AGENT_ID and ANTHROPIC_ENVIRONMENT_ID must be set to create managed agent sessions",
