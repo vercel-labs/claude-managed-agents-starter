@@ -95,14 +95,47 @@ async function pollAndStream(input: {
   return { lastEventId: lastId, done };
 }
 
+async function processTurn(
+  anthropicSessionId: string,
+  text: string,
+  lastEventId: string | null,
+): Promise<string | null> {
+  await sendMessage(anthropicSessionId, text);
+
+  let currentLastEventId = lastEventId;
+  for (let i = 0; i < MAX_POLLS_PER_TURN; i++) {
+    await sleep(POLL_INTERVAL);
+
+    const result = await pollAndStream({
+      anthropicSessionId,
+      lastEventId: currentLastEventId,
+    });
+
+    currentLastEventId = result.lastEventId;
+
+    if (result.done) {
+      console.log(`[sessionWorkflow] turn complete after ${i + 1} polls`);
+      break;
+    }
+  }
+  return currentLastEventId;
+}
+
 export async function sessionWorkflow(input: {
   internalSessionId: string;
   anthropicSessionId: string;
+  initialMessage: string;
 }) {
   "use workflow";
   console.log(`[sessionWorkflow] START internal=${input.internalSessionId} anthropic=${input.anthropicSessionId}`);
 
   let lastEventId: string | null = null;
+
+  lastEventId = await processTurn(
+    input.anthropicSessionId,
+    input.initialMessage,
+    lastEventId,
+  );
 
   const hook = messageHook.create({
     token: `msg:${input.internalSessionId}`,
@@ -110,23 +143,10 @@ export async function sessionWorkflow(input: {
 
   for await (const { text } of hook) {
     console.log(`[sessionWorkflow] received message: ${text.slice(0, 60)}`);
-
-    await sendMessage(input.anthropicSessionId, text);
-
-    for (let i = 0; i < MAX_POLLS_PER_TURN; i++) {
-      await sleep(POLL_INTERVAL);
-
-      const result = await pollAndStream({
-        anthropicSessionId: input.anthropicSessionId,
-        lastEventId,
-      });
-
-      lastEventId = result.lastEventId;
-
-      if (result.done) {
-        console.log(`[sessionWorkflow] turn complete after ${i + 1} polls`);
-        break;
-      }
-    }
+    lastEventId = await processTurn(
+      input.anthropicSessionId,
+      text,
+      lastEventId,
+    );
   }
 }
