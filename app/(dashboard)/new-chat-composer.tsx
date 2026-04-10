@@ -92,10 +92,11 @@ export function NewChatComposer({
       setCreating(true);
       setError(null);
       try {
+        const trimmed = message.trim();
         const res = await fetch("/api/managed-agents/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ text: trimmed }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -105,19 +106,6 @@ export function NewChatComposer({
           return;
         }
         const data = (await res.json()) as { id: string };
-        const trimmed = message.trim();
-        const msgRes = await fetch("/api/managed-agents/message", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId: data.id, text: trimmed }),
-        });
-        if (!msgRes.ok) {
-          const body = await msgRes.json().catch(() => ({}));
-          setError(
-            (body as { error?: string }).error ?? "Failed to send message",
-          );
-          return;
-        }
         setPrompt("");
         setPendingMessage(data.id, trimmed);
         router.push(`/chat/${data.id}`);

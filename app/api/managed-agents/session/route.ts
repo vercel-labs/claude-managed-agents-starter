@@ -13,11 +13,27 @@ import { sessionWorkflow } from "@/app/workflows/tail-session";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function POST(_request: NextRequest) {
+export async function POST(request: NextRequest) {
   const authz = await requireUserId();
   if ("error" in authz) return authz.error;
 
+  let body: { text?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const text = body.text?.trim();
+  if (!text) {
+    return NextResponse.json(
+      { error: "text is required" },
+      { status: 400 },
+    );
+  }
+
   const id = crypto.randomUUID();
+  const title = text.length > 60 ? `${text.slice(0, 57)}...` : text;
 
   let anthropic;
   try {
@@ -43,6 +59,7 @@ export async function POST(_request: NextRequest) {
     {
       internalSessionId: id,
       anthropicSessionId: anthropic.anthropicSessionId,
+      initialMessage: text,
     },
   ]);
 
@@ -50,7 +67,7 @@ export async function POST(_request: NextRequest) {
     id,
     userId: authz.userId,
     anthropicSessionId: anthropic.anthropicSessionId,
-    title: "New chat",
+    title,
     agentId: anthropic.agentId,
     environmentId: anthropic.environmentId,
     workflowRunId: run.runId,
