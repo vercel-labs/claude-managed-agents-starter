@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
+import { eq, and } from "drizzle-orm";
 import { getRun } from "workflow/api";
+import { requireUserId } from "@/lib/session";
+import { db } from "@/lib/db";
+import { managedAgentSession } from "@/lib/schema";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,23 +13,40 @@ type RouteContext = {
 };
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
+  const authz = await requireUserId();
+  if ("error" in authz) return authz.error;
+
   const { runId } = await params;
-  console.log(`[readable] GET runId=${runId}`);
+
+  const [row] = await db
+    .select({ id: managedAgentSession.id })
+    .from(managedAgentSession)
+    .where(
+      and(
+        eq(managedAgentSession.workflowRunId, runId),
+        eq(managedAgentSession.userId, authz.userId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return Response.json(
+      { error: "Not found" },
+      { status: 404 },
+    );
+  }
 
   let run;
   try {
     run = getRun(runId);
-  } catch (e) {
-    console.error(`[readable] getRun failed:`, e);
+  } catch {
     return Response.json(
-      { ok: false, error: { code: "RUN_NOT_FOUND", message: `Run ${runId} not found` } },
+      { error: "Run not found" },
       { status: 404 },
     );
   }
 
   const readable = run.getReadable();
-  console.log(`[readable] stream opened for runId=${runId}`);
-
   const encoder = new TextEncoder();
   const abortSignal = request.signal;
 
