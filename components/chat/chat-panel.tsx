@@ -451,7 +451,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex items-center gap-2 border-b border-border/50 py-3 px-4 md:px-6">
           {!sidebar.open && (
             <Button
@@ -475,7 +475,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           </div>
         </div>
 
-        <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {loading && !pending ? (
             <ChatSkeleton />
           ) : (
@@ -544,9 +544,9 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           )}
         </div>
 
-        <div className="shrink-0 px-4 pb-4">
-          <div className="mx-auto max-w-3xl">
-            <div className="rounded-2xl border border-border/60 bg-transparent shadow-none transition-shadow focus-within:border-border focus-within:shadow-sm">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-4">
+          <div className="pointer-events-auto mx-auto max-w-3xl">
+            <div className="rounded-2xl border border-border/60 bg-background/95 shadow-lg backdrop-blur transition-shadow focus-within:border-border focus-within:shadow-xl">
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
