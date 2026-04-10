@@ -262,7 +262,7 @@ function TranscriptRenderer({ grouped }: { grouped: EventGroup[] }) {
           return (
             <div key={ev.id} className="flex justify-end">
               <div className="max-w-[80%]">
-                <div className="rounded-2xl bg-muted/70 px-4 py-2.5 text-sm leading-relaxed">
+                <div className="rounded-2xl bg-muted/70 px-4 py-2.5 text-[15px] leading-relaxed">
                   <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
                 </div>
               </div>
@@ -274,7 +274,7 @@ function TranscriptRenderer({ grouped }: { grouped: EventGroup[] }) {
           const msg = textFromContent(payload.content);
           if (!msg) return null;
           return (
-            <div key={ev.id} className="max-w-none overflow-x-auto text-foreground/85">
+            <div key={ev.id} className="max-w-none overflow-x-auto text-[15px] leading-relaxed text-foreground/85">
               <Markdown text={msg} />
             </div>
           );
@@ -621,7 +621,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           )}
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-4 pb-4">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background from-55% to-transparent px-4 pb-4 pt-10">
           <div className="pointer-events-auto mx-auto max-w-3xl">
             <div className="rounded-2xl border border-border/60 bg-background/95 shadow-lg backdrop-blur transition-shadow focus-within:border-border focus-within:shadow-xl">
               <textarea
