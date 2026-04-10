@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { managedAgentSession } from "@/lib/schema";
 import { sendUserMessage } from "@/lib/managed-agents";
 import { requireUserId } from "@/lib/session";
+import { checkMessageRateLimit } from "@/lib/rate-limit";
 import { tailSessionWorkflow } from "@/app/workflows/tail-session";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,14 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const authz = await requireUserId();
   if ("error" in authz) return authz.error;
+
+  const rateCheck = checkMessageRateLimit(authz.userId);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: rateCheck.reason },
+      { status: 429 },
+    );
+  }
 
   let body: { sessionId?: string; text?: string };
   try {
