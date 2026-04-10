@@ -1,4 +1,4 @@
-# Internal Knowledge Agent
+# Claude Managed Agents Template
 
 An internal knowledge agent built with [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview). Connect your GitHub, Notion, and Slack via MCP and ask questions across all of them.
 
