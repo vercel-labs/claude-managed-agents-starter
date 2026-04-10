@@ -543,6 +543,18 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
 
   const grouped = groupEvents(events);
 
+  const lastUserIdx = events.findLastIndex((e) => e.type === "user.message");
+  const agentDoneAfterLastMsg = lastUserIdx >= 0 && events.slice(lastUserIdx + 1).some((ev) => {
+    if (ev.type === "session.status_terminated" || ev.type === "session.deleted") return true;
+    if (ev.type === "session.status_idle") {
+      const sr = (ev.payload as { stop_reason?: { type?: string } }).stop_reason;
+      return sr?.type === "end_turn" || sr?.type === "retries_exhausted";
+    }
+    return false;
+  });
+
+  const showThinking = !agentDoneAfterLastMsg && (tailing || sending) && lastUserIdx >= 0;
+
   return (
     <div className="flex h-full min-h-0">
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -580,8 +592,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 </div>
               )}
               <TranscriptRenderer grouped={grouped} />
-              {(tailing || sending) &&
-                events.some((e) => e.type === "user.message") && (
+              {showThinking && (
                 <div className="pt-3" role="status" aria-live="polite">
                   <div className="py-1 text-sm font-medium shimmer-text">
                     Thinking...
@@ -607,7 +618,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                 }}
                 placeholder="Explore a topic..."
                 rows={1}
-                disabled={sending || tailing}
+                disabled={sending || showThinking}
                 className="max-h-[200px] min-h-[44px] w-full resize-none bg-transparent px-5 pt-3.5 pb-1 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
                 style={{ height: "auto", overflow: "hidden" }}
                 onInput={(e) => {

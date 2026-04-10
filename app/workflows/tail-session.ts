@@ -1,3 +1,4 @@
+import { sleep } from "workflow";
 import { eq } from "drizzle-orm";
 import type { BetaManagedAgentsSessionEvent } from "@anthropic-ai/sdk/resources/beta/sessions/events";
 import { db } from "@/lib/db";
@@ -6,129 +7,94 @@ import { getAnthropic } from "@/lib/anthropic";
 import {
   anthropicEventId,
   eventOccurredAt,
-  isTerminalManagedAgentEvent,
 } from "@/lib/managed-agent-events";
 
 const MAX_POLLS = 500;
-const POLL_INTERVAL_MS = 3_000;
-const IDLE_POLLS_BEFORE_EXIT = 60;
+const POLL_INTERVAL = "3s";
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
-async function pollAndPersistStep(input: {
+async function persistEvents(input: {
   internalSessionId: string;
   anthropicSessionId: string;
 }) {
   "use step";
 
-  const { internalSessionId, anthropicSessionId } = input;
   const client = getAnthropic();
-  let idleCount = 0;
+  let page = await client.beta.sessions.events.list(
+    input.anthropicSessionId,
+    { order: "desc", limit: 50 },
+  );
 
-  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
-    if (attempt > 0) {
-      await delay(POLL_INTERVAL_MS);
-    }
+  let insertedAny = false;
 
-    let page = await client.beta.sessions.events.list(anthropicSessionId, {
-      order: "desc",
-      limit: 50,
-    });
+  for (;;) {
+    const items = page.data ?? [];
+    if (items.length === 0) break;
 
-    let latestUserMessageTime = 0;
-    let latestTerminalTime = 0;
-    let insertedAny = false;
+    let pageAllDuplicates = true;
 
-    for (;;) {
-      const items = page.data ?? [];
-      if (items.length === 0) break;
+    for (const ev of items as BetaManagedAgentsSessionEvent[]) {
+      const aid = anthropicEventId(ev);
+      if (!aid) continue;
 
-      let pageAllDuplicates = true;
+      const processedAt =
+        "processed_at" in ev &&
+        typeof (ev as { processed_at?: string | null }).processed_at ===
+          "string"
+          ? new Date((ev as { processed_at: string }).processed_at)
+          : null;
 
-      for (const ev of items as BetaManagedAgentsSessionEvent[]) {
-        const aid = anthropicEventId(ev);
-        if (!aid) continue;
+      const result = await db
+        .insert(managedAgentEvent)
+        .values({
+          id: crypto.randomUUID(),
+          sessionId: input.internalSessionId,
+          anthropicEventId: aid,
+          type: ev.type,
+          payload: ev as unknown as Record<string, unknown>,
+          processedAt,
+          occurredAt: eventOccurredAt(ev),
+        })
+        .onConflictDoNothing({
+          target: [
+            managedAgentEvent.sessionId,
+            managedAgentEvent.anthropicEventId,
+          ],
+        })
+        .returning({ id: managedAgentEvent.id });
 
-        const occurred = eventOccurredAt(ev);
-
-        if (ev.type === "user.message") {
-          const ts = occurred.getTime();
-          if (ts > latestUserMessageTime) latestUserMessageTime = ts;
-        }
-
-        if (isTerminalManagedAgentEvent(ev)) {
-          const ts = occurred.getTime();
-          if (ts > latestTerminalTime) latestTerminalTime = ts;
-        }
-
-        const processedAt =
-          "processed_at" in ev &&
-          typeof (ev as { processed_at?: string | null }).processed_at ===
-            "string"
-            ? new Date((ev as { processed_at: string }).processed_at)
-            : null;
-
-        const result = await db
-          .insert(managedAgentEvent)
-          .values({
-            id: crypto.randomUUID(),
-            sessionId: internalSessionId,
-            anthropicEventId: aid,
-            type: ev.type,
-            payload: ev as unknown as Record<string, unknown>,
-            processedAt,
-            occurredAt: occurred,
-          })
-          .onConflictDoNothing({
-            target: [
-              managedAgentEvent.sessionId,
-              managedAgentEvent.anthropicEventId,
-            ],
-          })
-          .returning({ id: managedAgentEvent.id });
-
-        if (result.length > 0) {
-          insertedAny = true;
-          pageAllDuplicates = false;
-        }
+      if (result.length > 0) {
+        insertedAny = true;
+        pageAllDuplicates = false;
       }
-
-      if (pageAllDuplicates && items.length > 0) break;
-      if (!page.hasNextPage()) break;
-      page = await page.getNextPage();
     }
 
-    if (insertedAny) {
-      idleCount = 0;
-      await db
-        .update(managedAgentSession)
-        .set({ updatedAt: new Date() })
-        .where(eq(managedAgentSession.id, internalSessionId));
-    } else {
-      idleCount++;
-    }
+    if (pageAllDuplicates && items.length > 0) break;
+    if (!page.hasNextPage()) break;
+    page = await page.getNextPage();
+  }
 
-    if (
-      insertedAny &&
-      latestTerminalTime > 0 &&
-      latestUserMessageTime > 0 &&
-      latestTerminalTime > latestUserMessageTime
-    ) {
-      return;
-    }
+  if (insertedAny) {
+    await db
+      .update(managedAgentSession)
+      .set({ updatedAt: new Date() })
+      .where(eq(managedAgentSession.id, input.internalSessionId));
+  }
+}
 
-    if (idleCount >= IDLE_POLLS_BEFORE_EXIT && attempt > IDLE_POLLS_BEFORE_EXIT) {
-      try {
-        const session = await client.beta.sessions.retrieve(anthropicSessionId);
-        if (session.status === "running") {
-          idleCount = 0;
-          continue;
-        }
-      } catch {}
-      return;
-    }
+async function isSessionDone(
+  anthropicSessionId: string,
+): Promise<boolean> {
+  "use step";
+
+  const client = getAnthropic();
+  try {
+    const session = await client.beta.sessions.retrieve(
+      anthropicSessionId,
+    );
+    return session.status !== "running";
+  } catch {
+    return true;
   }
 }
 
@@ -147,6 +113,17 @@ export async function tailSessionWorkflow(input: {
 }) {
   "use workflow";
 
-  await pollAndPersistStep(input);
+  for (let i = 0; i < MAX_POLLS; i++) {
+    await sleep(POLL_INTERVAL);
+    await persistEvents(input);
+
+    if (i % 5 === 0 && i > 0) {
+      const done = await isSessionDone(
+        input.anthropicSessionId,
+      );
+      if (done) break;
+    }
+  }
+
   await markTailingDone(input.internalSessionId);
 }
