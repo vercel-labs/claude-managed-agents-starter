@@ -424,9 +424,11 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const seenIdsRef = useRef(new Set<string>());
+  const runIdRef = useRef<string | null>(null);
 
   function connectToStream(runId: string) {
     eventSourceRef.current?.close();
+    runIdRef.current = runId;
 
     const es = new EventSource(`/api/readable/${runId}`);
     eventSourceRef.current = es;
@@ -542,6 +544,10 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Send failed");
+      }
+
+      if (runIdRef.current) {
+        connectToStream(runIdRef.current);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Send failed");
