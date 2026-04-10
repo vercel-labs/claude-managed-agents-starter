@@ -75,11 +75,24 @@ function Markdown({ text }: { text: string }) {
   );
 }
 
-/* ---------- PR detection ---------- */
-
 /* ---------- Tool categorization ---------- */
 
+function resolveToolName(ev: TranscriptEvent): string {
+  const name = typeof ev.payload.name === "string" ? ev.payload.name : "";
+  if (name) return name.toLowerCase();
+  return ev.type.replace("agent.", "").toLowerCase() || "tool";
+}
+
+function mcpServerFromName(name: string): string | null {
+  if (name.startsWith("notion__") || name.startsWith("notion_")) return "notion";
+  if (name.startsWith("github__") || name.startsWith("github_")) return "github";
+  if (name.startsWith("slack__") || name.startsWith("slack_")) return "slack";
+  return null;
+}
+
 function toolCategory(name: string): string {
+  const server = mcpServerFromName(name);
+  if (server) return server;
   switch (name) {
     case "bash":
     case "shell":
@@ -109,12 +122,14 @@ function toolCategory(name: string): string {
 function summarizeToolGroup(tools: TranscriptEvent[]): string {
   const counts = new Map<string, number>();
   for (const tool of tools) {
-    const name = typeof tool.payload.name === "string" ? tool.payload.name : "unknown";
-    const cat = toolCategory(name);
+    const cat = toolCategory(resolveToolName(tool));
     counts.set(cat, (counts.get(cat) ?? 0) + 1);
   }
 
   const order: [string, string, string, string][] = [
+    ["notion", "Used Notion", "time", "times"],
+    ["github", "Used GitHub", "time", "times"],
+    ["slack", "Used Slack", "time", "times"],
     ["ran", "Ran", "command", "commands"],
     ["edited", "Edited", "file", "files"],
     ["wrote", "Wrote", "file", "files"],
@@ -128,10 +143,16 @@ function summarizeToolGroup(tools: TranscriptEvent[]): string {
   for (const [key, verb, singular, plural] of order) {
     const n = counts.get(key);
     if (!n) continue;
-    parts.push(`${verb} ${n} ${n === 1 ? singular : plural}`);
+    parts.push(n === 1 ? verb : `${verb} ${n} ${plural}`);
   }
 
   return parts.join(", ") || `${tools.length} tool calls`;
+}
+
+function humanToolName(name: string): string {
+  const server = mcpServerFromName(name);
+  if (server) return name.replace(/^[^_]+__?/, "");
+  return name;
 }
 
 function describeToolAction(name: string, input: unknown): string {
@@ -147,13 +168,19 @@ function describeToolAction(name: string, input: unknown): string {
   if (name === "grep" || name === "rg") {
     return typeof obj.pattern === "string" ? obj.pattern : "";
   }
+  const server = mcpServerFromName(name);
+  if (server) {
+    const action = name.replace(/^[^_]+__?/, "").replace(/_/g, " ");
+    return action || "";
+  }
   return "";
 }
 
 function ToolCallItem({ ev }: { ev: TranscriptEvent }) {
   const [expanded, setExpanded] = useState(false);
-  const rawName = typeof ev.payload.name === "string" ? ev.payload.name : ev.type.replace("agent.", "");
+  const rawName = resolveToolName(ev);
   const input = ev.payload.input;
+  const displayName = humanToolName(rawName);
   const label = describeToolAction(rawName, input);
   const hasDetail = Boolean(input && typeof input === "object" && Object.keys(input as object).length > 0);
 
@@ -169,7 +196,7 @@ function ToolCallItem({ ev }: { ev: TranscriptEvent }) {
       >
         <Check className="size-3 shrink-0 text-muted-foreground" />
         <span className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px]">
-          {rawName}
+          {displayName}
         </span>
         {label && <span className="truncate text-foreground/80">{label}</span>}
         {hasDetail && (
@@ -215,6 +242,62 @@ function ToolGroup({ tools }: { tools: TranscriptEvent[] }) {
   );
 }
 
+/* ---------- Transcript renderer (flush-based, merges tools between user messages) ---------- */
+
+type EventGroup =
+  | { kind: "event"; event: TranscriptEvent }
+  | { kind: "tools"; events: TranscriptEvent[] };
+
+function TranscriptRenderer({ grouped }: { grouped: EventGroup[] }) {
+  return (
+    <div className="flex flex-col gap-4">
+      {grouped.map((group, idx) => {
+        if (group.kind === "tools") {
+          return <ToolGroup key={`tg-${idx}`} tools={group.events} />;
+        }
+        const ev = group.event;
+        const { type, payload } = ev;
+
+        if (type === "user.message") {
+          const msg = textFromContent(payload.content);
+          return (
+            <div key={ev.id} className="flex justify-end">
+              <div className="max-w-[80%]">
+                <div className="rounded-2xl bg-muted/70 px-4 py-2.5 text-sm leading-relaxed">
+                  <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        if (type === "agent.message") {
+          const msg = textFromContent(payload.content);
+          if (!msg) return null;
+          return (
+            <div key={ev.id} className="max-w-none overflow-x-auto text-foreground/85">
+              <Markdown text={msg} />
+            </div>
+          );
+        }
+
+        if (type === "session.status_idle") {
+          return (
+            <div key={ev.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <p className="text-xs font-medium text-amber-500">Requires action</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                This session needs confirmation in the Anthropic console.
+              </p>
+            </div>
+          );
+        }
+
+        return null;
+      })}
+    </div>
+  );
+}
+
 /* ---------- Skeleton ---------- */
 
 function ChatSkeleton() {
@@ -255,46 +338,64 @@ const TOOL_TYPES = new Set([
   "agent.custom_tool_use",
 ]);
 
-function groupEvents(events: TranscriptEvent[]) {
-  const groups: Array<
-    | { kind: "event"; event: TranscriptEvent }
-    | { kind: "tools"; events: TranscriptEvent[] }
-  > = [];
+function hasMoreToolsAhead(events: TranscriptEvent[], fromIndex: number): boolean {
+  for (let j = fromIndex; j < events.length; j++) {
+    const t = events[j].type;
+    if (TOOL_TYPES.has(t)) return true;
+    if (t === "user.message") return false;
+    if (t === "session.status_idle") return false;
+  }
+  return false;
+}
 
-  let i = 0;
-  while (i < events.length) {
-    const ev = events[i];
-    if (HIDDEN_TYPES.has(ev.type)) {
-      i++;
-      continue;
-    }
+function groupEvents(events: TranscriptEvent[]) {
+  const visible = events.filter((ev) => !HIDDEN_TYPES.has(ev.type));
+  const groups: EventGroup[] = [];
+  let pendingTools: TranscriptEvent[] = [];
+
+  const flushTools = () => {
+    if (pendingTools.length === 0) return;
+    groups.push({ kind: "tools", events: pendingTools });
+    pendingTools = [];
+  };
+
+  for (let i = 0; i < visible.length; i++) {
+    const ev = visible[i];
+
     if (TOOL_TYPES.has(ev.type)) {
-      const tools: TranscriptEvent[] = [ev];
-      i++;
-      while (i < events.length) {
-        const next = events[i];
-        if (TOOL_TYPES.has(next.type)) {
-          tools.push(next);
-          i++;
-        } else if (HIDDEN_TYPES.has(next.type)) {
-          i++;
-        } else {
-          break;
-        }
-      }
-      groups.push({ kind: "tools", events: tools });
+      pendingTools.push(ev);
       continue;
     }
-    if (ev.type === "session.status_idle") {
-      const sr = ev.payload.stop_reason as { type?: string } | undefined;
-      if (sr?.type !== "requires_action") {
-        i++;
+
+    if (ev.type === "user.message") {
+      flushTools();
+      groups.push({ kind: "event", event: ev });
+      continue;
+    }
+
+    if (ev.type === "agent.message") {
+      const msg = textFromContent(ev.payload.content);
+      if (!msg) continue;
+      if (pendingTools.length > 0 && hasMoreToolsAhead(visible, i + 1)) {
         continue;
       }
+      flushTools();
+      groups.push({ kind: "event", event: ev });
+      continue;
     }
+
+    if (ev.type === "session.status_idle") {
+      const sr = ev.payload.stop_reason as { type?: string } | undefined;
+      if (sr?.type !== "requires_action") continue;
+      flushTools();
+      groups.push({ kind: "event", event: ev });
+      continue;
+    }
+
     groups.push({ kind: "event", event: ev });
-    i++;
   }
+
+  flushTools();
   return groups;
 }
 
@@ -485,61 +586,16 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
                   <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
                 </div>
               )}
-              <div className="flex flex-col gap-4">
-                {grouped.map((group, idx) => {
-                  if (group.kind === "tools") {
-                    return <ToolGroup key={idx} tools={group.events} />;
-                  }
-                  const ev = group.event;
-                  const { type, payload } = ev;
-
-                  if (type === "user.message") {
-                    const msg = textFromContent(payload.content);
-                    return (
-                      <div key={ev.id} className="flex justify-end">
-                        <div className="max-w-[80%]">
-                          <div className="rounded-2xl bg-muted/70 px-4 py-2.5 text-sm leading-relaxed">
-                            <div className="whitespace-pre-wrap">{msg || "(empty)"}</div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (type === "agent.message") {
-                    const msg = textFromContent(payload.content);
-                    if (!msg) return null;
-                    return (
-                      <div key={ev.id} className="max-w-none overflow-x-auto text-foreground/85">
-                        <Markdown text={msg} />
-                      </div>
-                    );
-                  }
-
-                  if (type === "session.status_idle") {
-                    return (
-                      <div key={ev.id} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
-                        <p className="text-xs font-medium text-amber-500">Requires action</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          This session needs confirmation in the Anthropic console.
-                        </p>
-                      </div>
-                    );
-                  }
-
-                  return null;
-                })}
-                
-                {(tailing || sending) &&
-                  events.some((e) => e.type === "user.message") && (
-                  <div className="pt-3" role="status" aria-live="polite">
-                    <div className="py-1 text-sm font-medium shimmer-text">
-                      Thinking...
-                    </div>
+              <TranscriptRenderer grouped={grouped} />
+              {(tailing || sending) &&
+                events.some((e) => e.type === "user.message") && (
+                <div className="pt-3" role="status" aria-live="polite">
+                  <div className="py-1 text-sm font-medium shimmer-text">
+                    Thinking...
                   </div>
-                )}
-                <div ref={bottomRef} />
-              </div>
+                </div>
+              )}
+              <div ref={bottomRef} />
             </div>
           )}
         </div>
