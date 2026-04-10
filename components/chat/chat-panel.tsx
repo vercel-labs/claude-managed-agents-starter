@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronRight, Loader2, PanelLeft } from "lucide-react";
 import { Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
@@ -420,80 +420,97 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const optimisticTailing = useRef(!!pending);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const lastEventCountRef = useRef(0);
-  const staleTailingCountRef = useRef(0);
-  const STALE_TAILING_LIMIT = 24;
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const seenIdsRef = useRef(new Set<string>());
 
-  const poll = useCallback(async () => {
-    try {
-      const res = await fetch(
-        `/api/managed-agents/transcript?sessionId=${encodeURIComponent(sessionId)}`,
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string }).error ?? "Failed to load");
+  function connectToStream(runId: string) {
+    eventSourceRef.current?.close();
+
+    const es = new EventSource(`/api/readable/${runId}`);
+    eventSourceRef.current = es;
+    setTailing(true);
+
+    es.onmessage = (msg) => {
+      try {
+        const ev = JSON.parse(msg.data) as TranscriptEvent;
+        if (seenIdsRef.current.has(ev.id)) return;
+        seenIdsRef.current.add(ev.id);
+
+        setEvents((prev) => {
+          if (prev.some((e) => e.id === ev.id)) return prev;
+
+          const withoutOptimistic =
+            ev.type === "user.message"
+              ? prev.filter((e) => {
+                  if (!e.id.startsWith("optimistic-")) return true;
+                  return (
+                    textFromContent(e.payload.content) !==
+                    textFromContent(ev.payload.content)
+                  );
+                })
+              : prev;
+          return [...withoutOptimistic, ev];
+        });
+      } catch {
+        // ignore malformed events
       }
-      const data = (await res.json()) as {
-        title: string | null;
-        events: TranscriptEvent[];
-        tailing: boolean;
-      };
-      setEvents((prev) => {
-        const optimistic = prev.filter((e) => e.id.startsWith("optimistic-"));
-        if (optimistic.length === 0) return data.events;
-        const serverTexts = new Set(
-          data.events
-            .filter((e) => e.type === "user.message")
-            .map((e) => textFromContent(e.payload.content)),
+    };
+
+    es.onerror = () => {
+      es.close();
+      eventSourceRef.current = null;
+      setTailing(false);
+    };
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      try {
+        const res = await fetch(
+          `/api/managed-agents/transcript?sessionId=${encodeURIComponent(sessionId)}`,
         );
-        const stillPending = optimistic.filter(
-          (e) =>
-            !serverTexts.has(
-              textFromContent(e.payload.content),
-            ),
-        );
-        if (stillPending.length === 0) {
-          optimisticTailing.current = false;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            (body as { error?: string }).error ?? "Failed to load",
+          );
         }
-        return stillPending.length > 0
-          ? [...data.events, ...stillPending]
-          : data.events;
-      });
-      if (data.events.length !== lastEventCountRef.current) {
-        lastEventCountRef.current = data.events.length;
-        staleTailingCountRef.current = 0;
-      } else {
-        staleTailingCountRef.current++;
+        const data = (await res.json()) as {
+          title: string | null;
+          tailing: boolean;
+          workflowRunId: string | null;
+        };
+        if (cancelled) return;
+
+        setTitle(data.title);
+
+        if (data.workflowRunId) {
+          connectToStream(data.workflowRunId);
+        } else {
+          setTailing(false);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(
+            e instanceof Error ? e.message : "Failed to load transcript",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      const staleTimeout = staleTailingCountRef.current >= STALE_TAILING_LIMIT;
-
-      setTailing(
-        staleTimeout
-          ? false
-          : data.tailing || optimisticTailing.current,
-      );
-      setTitle(data.title);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load transcript");
-    } finally {
-      setLoading(false);
     }
+
+    void init();
+
+    return () => {
+      cancelled = true;
+      eventSourceRef.current?.close();
+    };
   }, [sessionId]);
-
-  useEffect(() => {
-    void poll();
-  }, [poll]);
-
-  useEffect(() => {
-    const intervalMs = tailing ? 2_500 : 5_000;
-    const id = setInterval(() => void poll(), intervalMs);
-    return () => clearInterval(id);
-  }, [poll, tailing]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -503,8 +520,6 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
-    optimisticTailing.current = true;
-    staleTailingCountRef.current = 0;
     setTailing(true);
     setError(null);
 
@@ -530,10 +545,12 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Send failed");
       }
-      optimisticTailing.current = false;
+      const data = (await res.json()) as { ok: boolean; runId?: string };
+      if (data.runId) {
+        connectToStream(data.runId);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Send failed");
-      optimisticTailing.current = false;
       setTailing(false);
       setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
     } finally {

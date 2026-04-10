@@ -1,7 +1,7 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { managedAgentEvent, managedAgentSession } from "@/lib/schema";
+import { managedAgentSession } from "@/lib/schema";
 import { requireUserId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -25,10 +25,7 @@ export async function GET(request: Request) {
       id: managedAgentSession.id,
       title: managedAgentSession.title,
       tailing: managedAgentSession.tailing,
-      repoOwner: managedAgentSession.repoOwner,
-      repoName: managedAgentSession.repoName,
-      baseBranch: managedAgentSession.baseBranch,
-      updatedAt: managedAgentSession.updatedAt,
+      workflowRunId: managedAgentSession.workflowRunId,
     })
     .from(managedAgentSession)
     .where(
@@ -44,33 +41,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  const events = await db
-    .select({
-      id: managedAgentEvent.id,
-      anthropicEventId: managedAgentEvent.anthropicEventId,
-      type: managedAgentEvent.type,
-      payload: managedAgentEvent.payload,
-      processedAt: managedAgentEvent.processedAt,
-      occurredAt: managedAgentEvent.occurredAt,
-    })
-    .from(managedAgentEvent)
-    .where(eq(managedAgentEvent.sessionId, sessionId))
-    .orderBy(asc(managedAgentEvent.occurredAt));
-
   return NextResponse.json({
     title: sessionRow.title,
     tailing: sessionRow.tailing,
-    repoOwner: sessionRow.repoOwner,
-    repoName: sessionRow.repoName,
-    baseBranch: sessionRow.baseBranch,
-    updatedAt: sessionRow.updatedAt.toISOString(),
-    events: events.map((e) => ({
-      id: e.id,
-      anthropicEventId: e.anthropicEventId,
-      type: e.type,
-      payload: e.payload,
-      processedAt: e.processedAt?.toISOString() ?? null,
-      occurredAt: e.occurredAt.toISOString(),
-    })),
+    workflowRunId: sessionRow.workflowRunId,
   });
 }

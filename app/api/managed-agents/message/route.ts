@@ -82,12 +82,17 @@ export async function POST(request: Request) {
       ),
     );
 
-  await start(tailSessionWorkflow, [
+  const run = await start(tailSessionWorkflow, [
     {
       internalSessionId: sessionId,
       anthropicSessionId: row.anthropicSessionId,
     },
   ]);
 
-  return NextResponse.json({ ok: true });
+  await db
+    .update(managedAgentSession)
+    .set({ workflowRunId: run.runId })
+    .where(eq(managedAgentSession.id, sessionId));
+
+  return NextResponse.json({ ok: true, runId: run.runId });
 }

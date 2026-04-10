@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { managedAgentSession, managedAgentEvent } from "@/lib/schema";
+import { managedAgentSession } from "@/lib/schema";
 import { createCodingSession } from "@/lib/managed-agents";
 import { requireUserId } from "@/lib/session";
 import { getOrCreateVaultForUser, syncMCPCredential } from "@/lib/vault";
@@ -78,9 +78,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  await db
-    .delete(managedAgentEvent)
-    .where(eq(managedAgentEvent.sessionId, sessionId));
   await db
     .delete(managedAgentSession)
     .where(eq(managedAgentSession.id, sessionId));
