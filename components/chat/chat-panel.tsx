@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, Clock3, GitBranch, GitPullRequest, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUp, Check, ChevronRight, Clock3, Loader2, PanelLeft } from "lucide-react";
 import { Streamdown, type Components } from "streamdown";
 import { cn } from "@/lib/utils";
 import { consumePendingMessage } from "@/lib/pending-message";
-import { GitHubIcon } from "@/components/icons";
 import { formatTimeAgo } from "@/lib/time";
+import { useSidebar } from "@/lib/sidebar-context";
+import { Button } from "@/components/ui/button";
 
 type TranscriptEvent = {
   id: string;
@@ -75,39 +76,6 @@ function Markdown({ text }: { text: string }) {
 }
 
 /* ---------- PR detection ---------- */
-
-const PR_URL_REGEX = /https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/g;
-
-interface DetectedPR {
-  url: string;
-  owner: string;
-  repo: string;
-  number: number;
-}
-
-function extractPRsFromEvents(events: TranscriptEvent[]): DetectedPR[] {
-  const seen = new Set<string>();
-  const prs: DetectedPR[] = [];
-
-  for (const ev of events) {
-    const text = JSON.stringify(ev.payload);
-    let match;
-    PR_URL_REGEX.lastIndex = 0;
-    while ((match = PR_URL_REGEX.exec(text)) !== null) {
-      const url = match[0];
-      if (seen.has(url)) continue;
-      seen.add(url);
-      prs.push({
-        url,
-        owner: match[1],
-        repo: match[2],
-        number: parseInt(match[3], 10),
-      });
-    }
-  }
-  return prs;
-}
-
 
 /* ---------- Tool categorization ---------- */
 
@@ -333,6 +301,7 @@ function groupEvents(events: TranscriptEvent[]) {
 /* ---------- Main panel ---------- */
 
 export function ChatPanel({ sessionId }: { sessionId: string }) {
+  const sidebar = useSidebar();
   const [pending] = useState(() => consumePendingMessage(sessionId));
   const [events, setEvents] = useState<TranscriptEvent[]>(() => {
     if (!pending) return [];
@@ -347,12 +316,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   });
   const [tailing, setTailing] = useState(!!pending);
   const [title, setTitle] = useState<string | null>(null);
-  const [sessionMeta, setSessionMeta] = useState<{
-    repoOwner: string | null;
-    repoName: string | null;
-    baseBranch: string | null;
-    updatedAt: string | null;
-  }>({ repoOwner: null, repoName: null, baseBranch: null, updatedAt: null });
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -418,12 +382,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           : data.tailing || optimisticTailing.current,
       );
       setTitle(data.title);
-      setSessionMeta({
-        repoOwner: data.repoOwner,
-        repoName: data.repoName,
-        baseBranch: data.baseBranch,
-        updatedAt: data.updatedAt,
-      });
+      setUpdatedAt(data.updatedAt);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load transcript");
@@ -489,18 +448,22 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   }
 
   const grouped = groupEvents(events);
-  const detectedPRs = useMemo(() => extractPRsFromEvents(events), [events]);
-
-  const repoFullName = sessionMeta.repoOwner && sessionMeta.repoName
-    ? `${sessionMeta.repoOwner}/${sessionMeta.repoName}`
-    : null;
-  const repoUrl = repoFullName ? `https://github.com/${repoFullName}` : null;
-  const latestPr = detectedPRs[detectedPRs.length - 1] ?? null;
 
   return (
     <div className="flex h-full min-h-0">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-2 border-b border-border/50 py-3 pl-12 pr-4 md:pl-6">
+        <div className="flex items-center gap-2 border-b border-border/50 py-3 px-4 md:px-6">
+          {!sidebar.open && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="hidden shrink-0 md:flex"
+              onClick={sidebar.toggle}
+              aria-label="Open sidebar"
+            >
+              <PanelLeft className="size-4" />
+            </Button>
+          )}
           <div className="min-w-0 flex-1">
             {loading ? (
               <div className="h-5 w-48 animate-pulse rounded bg-muted/40" />
@@ -510,20 +473,9 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
               </h1>
             )}
           </div>
-          {latestPr && (
-            <a
-              href={latestPr.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-muted/60"
-            >
-              <GitPullRequest className="size-3.5" />
-              PR #{latestPr.number}
-            </a>
-          )}
         </div>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {loading && !pending ? (
             <ChatSkeleton />
           ) : (
@@ -636,72 +588,24 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         </div>
       </div>
 
-      <aside className="hidden w-72 shrink-0 border-l border-border/70 px-4 py-4 lg:block">
+      <aside className="hidden w-64 shrink-0 border-l border-border/50 px-4 py-4 lg:block">
         <div className="space-y-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Sources
+            Details
           </p>
 
           <div className="space-y-3">
-            {repoFullName && (
-              <SidebarRow
-                icon={<GitHubIcon className="size-4" />}
-                value={repoFullName}
-                href={repoUrl ?? undefined}
-              />
-            )}
-            {sessionMeta.baseBranch && (
-              <SidebarRow
-                icon={<GitBranch className="size-4" />}
-                value={sessionMeta.baseBranch}
-              />
-            )}
-            {sessionMeta.updatedAt && (
-              <SidebarRow
-                icon={<Clock3 className="size-4" />}
-                value={formatTimeAgo(sessionMeta.updatedAt) || "just now"}
-              />
-            )}
-            {latestPr && (
-              <SidebarRow
-                icon={<GitPullRequest className="size-4" />}
-                value={`PR #${latestPr.number}`}
-                href={latestPr.url}
-              />
+            {updatedAt && (
+              <div className="flex items-center gap-2.5">
+                <Clock3 className="size-4 shrink-0 text-muted-foreground" />
+                <p className="truncate text-sm text-muted-foreground" suppressHydrationWarning>
+                  {formatTimeAgo(updatedAt) || "just now"}
+                </p>
+              </div>
             )}
           </div>
         </div>
       </aside>
-    </div>
-  );
-}
-
-function SidebarRow({
-  icon,
-  value,
-  href,
-}: {
-  icon: React.ReactNode;
-  value: string;
-  href?: string;
-}) {
-  return (
-    <div className="flex items-center gap-2.5">
-      <span className="shrink-0 text-muted-foreground">{icon}</span>
-      {href ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="truncate text-sm text-muted-foreground hover:underline"
-        >
-          {value}
-        </a>
-      ) : (
-        <p className="truncate text-sm text-muted-foreground" suppressHydrationWarning>
-          {value}
-        </p>
-      )}
     </div>
   );
 }
