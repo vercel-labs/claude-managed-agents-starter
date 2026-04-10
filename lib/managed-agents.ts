@@ -30,17 +30,3 @@ export async function createCodingSession(vaultIds: string[]) {
   };
 }
 
-export async function sendUserMessage(
-  anthropicSessionId: string,
-  text: string,
-) {
-  const client = getAnthropic();
-  await client.beta.sessions.events.send(anthropicSessionId, {
-    events: [
-      {
-        type: "user.message",
-        content: [{ type: "text", text }],
-      },
-    ],
-  });
-}

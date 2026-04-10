@@ -67,7 +67,6 @@ export const managedAgentSession = pgTable("managed_agent_session", {
     .defaultNow(),
   agentId: text("agent_id").notNull(),
   environmentId: text("environment_id").notNull(),
-  tailing: boolean("tailing").notNull().default(false),
   workflowRunId: text("workflow_run_id"),
   repoUrl: text("repo_url"),
   repoOwner: text("repo_owner"),
