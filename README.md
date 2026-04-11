@@ -1,5 +1,3 @@
-![Claude Managed Agents](./public/hero.png)
-
 # Claude Managed Agents Template
 
 An internal knowledge agent built with [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview). Connect your GitHub, Notion, and Slack via MCP and ask questions across all of them. Read more in the [guide](https://vercel.com/kb/guide/claude-managed-agent-vercel).
@@ -16,6 +14,8 @@ An internal knowledge agent built with [Claude Managed Agents](https://platform.
 | Data | [Neon](https://neon.tech) + [Drizzle ORM](https://orm.drizzle.team) |
 | Background | [Workflow SDK](https://useworkflow.dev) |
 | Agents | [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) via `@anthropic-ai/sdk` |
+
+![Claude Managed Agents](./public/hero.png)
 
 ## Setup
 
