@@ -12,7 +12,7 @@ An internal knowledge agent built with [Claude Managed Agents](https://platform.
 | UI | [shadcn/ui](https://ui.shadcn.com), Tailwind CSS v4 |
 | Auth | [Better Auth](https://www.better-auth.com) + [Sign in with Vercel](https://vercel.com/docs/sign-in-with-vercel/getting-started) |
 | Data | [Neon](https://neon.tech) + [Drizzle ORM](https://orm.drizzle.team) |
-| Background | [Workflow DevKit](https://useworkflow.dev) |
+| Background | [Workflow SDK](https://useworkflow.dev) |
 | Agents | [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) via `@anthropic-ai/sdk` |
 
 ## Setup
