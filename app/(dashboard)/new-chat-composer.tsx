@@ -258,10 +258,9 @@ export function NewChatComposer({
           href="https://github.com/vercel-labs/claude-managed-agents-starter"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 transition-colors hover:text-muted-foreground"
+          className="align-middle transition-colors hover:text-muted-foreground"
         >
-          <GitHubIcon className="size-3.5" />
-          GitHub
+          <GitHubIcon className="inline size-4 align-middle" />
         </a>
       </p>
 
