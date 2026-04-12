@@ -39,7 +39,7 @@ The Workflow SDK generates routes under `app/.well-known/workflow/v1/` at build 
 
 ## Middleware
 
-`middleware.ts` runs on every request (except static assets and workflow internals).
+`proxy.ts` runs on every request (except static assets and workflow internals).
 
 - **Public paths**: `/`, `/login*`, `/api/auth*`, `/auth/error*`, `/.well-known/workflow*`
 - **Protected paths**: `/chat*`, `/api/managed-agents*` - requires a Better Auth session cookie
@@ -111,7 +111,7 @@ The app uses the [Workflow SDK](https://useworkflow.dev/) for durable background
 - Workflow files use `"use workflow"` and `"use step"` directives
 - Steps are individually retryable and survive server restarts
 - `sleep()` from `workflow` provides durable timers (not `setTimeout`)
-- The workflow runtime generates routes under `.well-known/workflow/` - these must be excluded from middleware auth checks
+- The workflow runtime generates routes under `.well-known/workflow/` - these must be excluded from proxy auth checks
 
 ## Server External Packages
 
