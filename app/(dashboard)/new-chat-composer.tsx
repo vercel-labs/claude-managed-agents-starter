@@ -253,6 +253,16 @@ export function NewChatComposer({
         >
           Deploy your own
         </a>
+        {" "}&middot;{" "}
+        <a
+          href="https://github.com/vercel-labs/claude-managed-agents-starter"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 transition-colors hover:text-muted-foreground"
+        >
+          <GitHubIcon className="size-3.5" />
+          GitHub
+        </a>
       </p>
 
       <SignInModal open={showSignIn} onOpenChange={setShowSignIn} />
