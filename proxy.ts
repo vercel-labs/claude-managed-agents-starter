@@ -20,7 +20,7 @@ function needsAuth(pathname: string) {
   );
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublicPath(pathname)) {
@@ -33,9 +33,6 @@ export function middleware(request: NextRequest) {
 
   const token = getSessionCookie(request);
   if (!token) {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);
