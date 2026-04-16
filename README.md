@@ -17,58 +17,75 @@ An internal knowledge agent built with [Claude Managed Agents](https://platform.
 | Background | [Workflow SDK](https://useworkflow.dev) |
 | Agents | [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) via `@anthropic-ai/sdk` |
 
-## Setup
+## Quickstart
 
-### 1. Clone and install
+### 1. Clone, install skills, and provision integrations
+
+```bash
+git clone https://github.com/vercel-labs/claude-managed-agents.git
+cd claude-managed-agents
+npx skills add anthropics/skills --skill claude-api
+npx skills add vercel/workflow
+vercel link
+vercel integration add neon
+```
+
+### 2. Generate secrets and pull environment variables
+
+```bash
+echo "$(openssl rand -base64 32)" | vercel env add BETTER_AUTH_SECRET production preview development
+echo "$(openssl rand -hex 32)" | vercel env add TOKEN_ENCRYPTION_KEY production preview development
+vercel env pull
+```
+
+This generates both secrets and writes `.env.local` with `DATABASE_URL`, Neon vars, and the secrets.
+
+### 3. Set remaining environment variables
+
+Add these to `.env.local` (or via `vercel env add`):
+
+| Variable | How to get it |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) |
+| `ANTHROPIC_AGENT_ID` | Create an agent via the [Managed Agents quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart) |
+| `ANTHROPIC_ENVIRONMENT_ID` | Create an environment for the agent and copy its ID |
+| `BETTER_AUTH_URL` | `http://localhost:3000` (or your deployment URL) |
+| `VERCEL_CLIENT_ID` | Create an OAuth app via [Sign in with Vercel](https://vercel.com/docs/sign-in-with-vercel/getting-started). Callback: `<url>/api/auth/callback/vercel` |
+| `VERCEL_CLIENT_SECRET` | From the same Vercel OAuth app |
+
+Optional for GitHub integration:
+
+| Variable | How to get it |
+| --- | --- |
+| `GITHUB_CLIENT_ID` | [Create a GitHub OAuth app](https://github.com/settings/applications/new) |
+| `GITHUB_CLIENT_SECRET` | From the same GitHub OAuth app |
+
+### 4. Install dependencies and push schema
 
 ```bash
 pnpm install
-```
-
-### 2. Environment variables
-
-Copy `.env.example` to `.env.local` and fill in each variable:
-
-| Variable | Where to get it |
-| --- | --- |
-| `DATABASE_URL` | Auto-provisioned by the Deploy button, or via `vercel integration add neon`. Or create a database at [neon.tech](https://neon.tech). |
-| `ANTHROPIC_API_KEY` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) |
-| `ANTHROPIC_AGENT_ID` | Create an agent via the [Managed Agents quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart). |
-| `ANTHROPIC_ENVIRONMENT_ID` | Create an environment for your agent and copy the ID. |
-| `BETTER_AUTH_SECRET` | Generate with `openssl rand -base64 32`. |
-| `BETTER_AUTH_URL` | `http://localhost:3000` locally, your deployment URL in production. |
-| `VERCEL_CLIENT_ID` | Create an OAuth app via [Sign in with Vercel](https://vercel.com/docs/sign-in-with-vercel/getting-started). Callback: `<your-url>/api/auth/callback/vercel`. |
-| `VERCEL_CLIENT_SECRET` | From the same Vercel OAuth app. |
-| `TOKEN_ENCRYPTION_KEY` | Generate with `openssl rand -hex 32`. |
-| `GITHUB_CLIENT_ID` | *(Optional)* [Create a GitHub OAuth app](https://github.com/settings/applications/new) for the GitHub integration. |
-| `GITHUB_CLIENT_SECRET` | *(Optional)* From the same GitHub OAuth app. |
-
-### 3. Push database schema
-
-```bash
 pnpm db:push
 ```
 
-### 4. Run
+### 5. Run
 
 ```bash
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), sign in, and start asking questions.
+### Key files
 
-## Agent Skills
-
-```bash
-npx skills add anthropics/skills --skill claude-api
-npx skills add vercel/workflow
-```
-
-## Vercel Marketplace Integrations
-
-```bash
-vercel integration add neon
-```
+| File | Purpose |
+| --- | --- |
+| `lib/auth.ts` | Better Auth config (Vercel OIDC + optional GitHub OAuth) |
+| `lib/session.ts` | `getSession()` and `requireUserId()` server helpers |
+| `proxy.ts` | Auth guard — redirects unauthenticated users on protected routes |
+| `lib/schema.ts` | Drizzle schema (Better Auth tables + managed agent tables) |
+| `lib/db.ts` | Neon + Drizzle client |
+| `lib/anthropic.ts` | Anthropic SDK client factory |
+| `lib/managed-agents.ts` | Session creation + message sending |
+| `app/workflows/tail-session.ts` | Durable workflow: polls Anthropic events, persists to Postgres |
+| `app/api/managed-agents/` | REST API routes (session, message, transcript) |
 
 ## References
 
