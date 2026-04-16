@@ -57,6 +57,19 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000), sign in, and start asking questions.
 
+## Agent Skills
+
+```bash
+npx skills add anthropics/skills --skill claude-api
+npx skills add vercel/workflow
+```
+
+## Vercel Marketplace Integrations
+
+```bash
+vercel integration add neon
+```
+
 ## References
 
 - [Managed Agents overview](https://platform.claude.com/docs/en/managed-agents/overview)
