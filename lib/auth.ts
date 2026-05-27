@@ -62,6 +62,19 @@ export const auth = betterAuth({
                 clientSecret: vercelClientSecret!,
                 scopes: ["openid", "email", "profile", "offline_access"],
                 pkce: true,
+                // Vercel's OIDC userinfo only returns sub/preferred_username/email/picture,
+                // never `name`. Fall back so user.name (notNull) doesn't break sign-in.
+                mapProfileToUser: (profile) => {
+                  const email =
+                    typeof profile.email === "string" ? profile.email : undefined;
+                  const name =
+                    (typeof profile.name === "string" && profile.name) ||
+                    (typeof profile.preferred_username === "string" &&
+                      profile.preferred_username) ||
+                    (email ? email.split("@")[0] : undefined) ||
+                    (typeof profile.sub === "string" ? profile.sub : "Vercel user");
+                  return { name };
+                },
               },
             ],
           }),
